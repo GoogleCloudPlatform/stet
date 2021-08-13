@@ -1,0 +1,13 @@
+encrypt_config:
+  key_config:
+    kek_infos:
+    - kek_uri: "gcp-kms://projects/my-project/locations/us-east1/keyRings/my-key-ring/cryptoKeys/my-key"
+    dek_algorithm: AES256_GCM
+    no_split: true
+
+decrypt_config:
+  key_configs:
+  - kek_infos:  # Note the extra hyphen here, because key_configs is a repeated field.
+    - kek_uri: "gcp-kms://projects/my-project/locations/us-east1/keyRings/my-key-ring/cryptoKeys/my-key"
+    dek_algorithm: AES256_GCM
+    no_split: true

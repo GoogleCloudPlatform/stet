@@ -1,0 +1,136 @@
+// Copyright 2021 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package google.cloud.googlekeybroker.confidential.v0;
+
+import "google/api/annotations.proto";
+import "google/protobuf/duration.proto";
+
+option go_package = "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto";
+
+service ConfidentialWrapUnwrapService {
+  // Extension of the existing Wrap RPC, with encrypted session changes.
+  rpc ConfidentialWrap(ConfidentialWrapRequest)
+      returns (ConfidentialWrapResponse) {
+    option (google.api.http) = {
+      post: "/v0/{key_path=**}:confidential-wrap"
+      body: "*"
+    };
+  }
+
+  // Extension of the existing Unwrap RPC, with encrypted session changes.
+  rpc ConfidentialUnwrap(ConfidentialUnwrapRequest)
+      returns (ConfidentialUnwrapResponse) {
+    option (google.api.http) = {
+      post: "/v0/{key_path=**}:confidential-unwrap"
+      body: "*"
+    };
+  }
+}
+
+// Identical to the fields in [Un]wrapRequest, minus the payload itself.
+message RequestMetadata {
+  reserved 2, 4;  // wrapped_blob, AAD
+  string key_path = 1;
+  // Skip the wrapped_blob field, maintaining compatibility with the [Un]wrap
+  // request buffers for encoding/decoding.
+  RequestContext additional_context = 3;
+  string key_uri_prefix = 5;
+}
+
+message ConfidentialWrapRequest {
+  // Previously-negotiated session context, defined by the EKM and opaque to
+  // Google. Required.
+  bytes session_context = 1;
+
+  // A serialized and TLS session-encrypted (via |session_context|) WrapRequest.
+  // Required.
+  bytes tls_records = 2;
+
+  // Relevant subset of metadata from the serialized |records|. Optional.
+  RequestMetadata request_metadata = 3;
+}
+
+message ConfidentialWrapResponse {
+  // A serialized and TLS session-encrypted WrapResponse. Required.
+  bytes tls_records = 1;
+}
+
+message ConfidentialUnwrapRequest {
+  // Previously-negotiated session context, defined by the EKM and opaque to
+  // Google. Required.
+  bytes session_context = 1;
+
+  // A serialized and TLS session-encrypted (via |session_context|)
+  // UnwrapRequest. Required.
+  bytes tls_records = 2;
+
+  // Relevant subset of metadata from the serialized |records|. Optional.
+  RequestMetadata request_metadata = 3;
+}
+
+message ConfidentialUnwrapResponse {
+  // A serialized and TLS session-encrypted UnwrapResponse. Required.
+  bytes tls_records = 1;
+}
+
+// The following message definitions are taken from existing definitions.
+message WrapRequest {
+  string key_path = 1;
+  bytes plaintext = 2;
+  RequestContext additional_context = 3;
+  bytes additional_authenticated_data = 4;
+  string key_uri_prefix = 5;
+}
+
+message WrapResponse {
+  bytes wrapped_blob = 1;
+}
+
+message UnwrapRequest {
+  string key_path = 1;
+  bytes wrapped_blob = 2;
+  RequestContext additional_context = 3;
+  bytes additional_authenticated_data = 4;
+  string key_uri_prefix = 5;
+}
+
+message UnwrapResponse {
+  bytes plaintext = 1;
+  google.protobuf.Duration allowed_cache_duration = 2;
+}
+
+message RequestContext {
+  string full_resource_name = 1;
+  string relative_resource_name = 2;
+  AccessReasonContext access_reason_context = 3;
+  bool is_key_health_check = 4;
+}
+
+message AccessReasonContext {
+  enum Reason {
+    REASON_UNSPECIFIED = 0;
+    CUSTOMER_INITIATED_SUPPORT = 1;
+    GOOGLE_INITIATED_SERVICE = 2;
+    THIRD_PARTY_DATA_REQUEST = 3;
+    GOOGLE_INITIATED_REVIEW = 4;
+    CUSTOMER_INITIATED_ACCESS = 5;
+    GOOGLE_INITIATED_SYSTEM_OPERATION = 6;
+    REASON_NOT_EXPECTED = 7;
+    MODIFIED_CUSTOMER_INITIATED_ACCESS = 8;
+  }
+  Reason reason = 1;
+}

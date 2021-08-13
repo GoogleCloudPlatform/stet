@@ -1,0 +1,8 @@
+# Ignore all bazel-* symlinks.
+bazel-*
+
+# Ignore vendored proto files.
+proto/vendor/*
+
+# Ignore compiled proto files.
+*.pb.go

@@ -1,0 +1,98 @@
+// Copyright 2021 Google LLC
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//      http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package stet.client.proto;
+
+option go_package = "github.com/GoogleCloudPlatform/stet/proto/config_go_proto";
+
+enum DekAlgorithm {
+  UNKNOWN = 0;
+  AES256_GCM = 1;
+}
+
+message KekInfo {
+  // The URI of the Key Encryption Key.
+  string kek_uri = 1;
+}
+
+message ShamirConfig {
+  // Number of shares needed to reconstitute the secret for Shamir's Secret
+  // Sharing.
+  int64 threshold = 1;
+
+  // Total number of shares to split the secret into for Shamir's Secret
+  // Sharing.
+  int64 shares = 2;
+}
+
+message KeyConfig {
+  // Information about the Key Encryption Key.
+  repeated KekInfo kek_infos = 1;
+
+  // The algorithm used to generate the Data Encryption Key.
+  DekAlgorithm dek_algorithm = 2;
+
+  // The algorithm used to split the DEK into shares.
+  oneof key_splitting_algorithm {
+    // No splitting of the DEK (effectively a 1-of-1 encryption scheme).
+    bool no_split = 3;
+
+    // Shamir's secret sharing, supporting k-of-n encryption schemes.
+    ShamirConfig shamir = 4;
+  }
+}
+
+// Top-level config object for the STET binary.
+message StetConfig {
+  EncryptConfig encrypt_config = 1;
+  DecryptConfig decrypt_config = 2;
+}
+
+message EncryptConfig {
+  // The key config to encrypt with.
+  KeyConfig key_config = 1;
+}
+
+message DecryptConfig {
+  // The set of KeyConfigs that are known to the client. The decryption logic
+  // will look to figure out which KeyConfig matches the hashed config_id.
+  repeated KeyConfig key_configs = 1;
+}
+
+// The metadata needed to store alongside encrypted data.
+message Metadata {
+  repeated WrappedShare shares = 1;
+  string blob_id = 2;
+  KeyConfig key_config = 3;
+}
+
+// Represents a wrapped share and its unwrapped SHA-256 hash.
+message WrappedShare {
+  // The bytes of the wrapped share. Required.
+  bytes share = 1;
+
+  // The SHA-256 hash of the actual (unwrapped) share. Required.
+  bytes hash = 2;
+}
+
+// Data encrypted by the client and the associated metadata.
+message EncryptedData {
+  // The bytes of the encrypted plaintext. Required.
+  bytes ciphertext = 1;
+
+  // The metadata corresponding to the ciphertext. Required.
+  Metadata metadata = 2;
+}
