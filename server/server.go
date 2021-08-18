@@ -26,6 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/stet/constants"
 	attpb "github.com/GoogleCloudPlatform/stet/proto/attestation_evidence_go_proto"
 	cwpb "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
+	pb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	sspb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	ts "github.com/GoogleCloudPlatform/stet/transportshim"
 	glog "github.com/golang/glog"
@@ -70,6 +71,9 @@ type SecureSessionService struct {
 	mu       sync.Mutex
 	channels map[string]*Channel
 	keys     map[string]string
+
+	// Necessary to embed this to maintain forward compatibility.
+	pb.UnimplementedConfidentialEkmSessionEstablishmentServiceServer
 }
 
 // minUnchunkedAttestationSize used as hint to apply multiple
