@@ -73,6 +73,7 @@ go_test(
     ],
     embed = [":client"],
     deps = [
+        "//proto:confidential_wrap_go_proto",
         "//proto:config_go_proto",
         "@com_github_google_tink_go//subtle/random:go_default_library",
         "@com_github_googleapis_gax_go_v2//:go_default_library",

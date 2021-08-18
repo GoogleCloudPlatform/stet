@@ -25,7 +25,8 @@ import (
 
 	"github.com/GoogleCloudPlatform/stet/constants"
 	attpb "github.com/GoogleCloudPlatform/stet/proto/attestation_evidence_go_proto"
-	pb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
+	cwpb "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
+	sspb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	ts "github.com/GoogleCloudPlatform/stet/transportshim"
 	glog "github.com/golang/glog"
 	"github.com/google/uuid"
@@ -47,6 +48,15 @@ const (
 	ServerStateUnknown
 )
 
+const (
+	// KeyURI1 is the URI for key1 in the reference server.
+	KeyURI1 = "https://reference_server.com/v0/key1"
+	key1    = "key1encrypted"
+	// KeyURI2 is the URI for key2 in the reference server.
+	KeyURI2 = "https://reference_server.com/v0/key2"
+	key2    = "key2encrypted"
+)
+
 // Channel for connection internals
 type Channel struct {
 	conn   *tls.Conn
@@ -59,11 +69,20 @@ type Channel struct {
 type SecureSessionService struct {
 	mu       sync.Mutex
 	channels map[string]*Channel
+	keys     map[string]string
 }
 
 // minUnchunkedAttestationSize used as hint to apply multiple
 // read approach when receiving the attestation.
 const minUnchunkedAttestationSize = 1024
+
+// Wrap takes in a keyPath, aad, and plaintext, and outputs the wrapped
+// plaintext that the server returns. Invariant: object must have been
+// created through NewSecureSessionService to set up keys. keyURI must be valid.
+func (s *SecureSessionService) Wrap(keyURI string, aad, plaintext []byte) []byte {
+	key := s.keys[keyURI]
+	return append(append(aad, key...), plaintext...)
+}
 
 // NewChannel sets up tls context and network shim
 func NewChannel() (ch *Channel, err error) {
@@ -98,10 +117,14 @@ func NewChannel() (ch *Channel, err error) {
 func NewSecureSessionService() (srv *SecureSessionService, err error) {
 	srv = &SecureSessionService{}
 	srv.channels = make(map[string]*Channel)
+	srv.keys = map[string]string{
+		KeyURI1: key1,
+		KeyURI2: key2,
+	}
 	return srv, nil
 }
 
-func (s *SecureSessionService) BeginSession(ctx context.Context, req *pb.BeginSessionRequest) (*pb.BeginSessionResponse, error) {
+func (s *SecureSessionService) BeginSession(ctx context.Context, req *sspb.BeginSessionRequest) (*sspb.BeginSessionResponse, error) {
 
 	ch, err := NewChannel()
 
@@ -118,7 +141,7 @@ func (s *SecureSessionService) BeginSession(ctx context.Context, req *pb.BeginSe
 
 	ch.shim.QueueReceiveBuf(req.TlsRecords)
 
-	rep := &pb.BeginSessionResponse{
+	rep := &sspb.BeginSessionResponse{
 		SessionContext: ch.connID,
 		TlsRecords:     ch.shim.GetSendBuf(0),
 	}
@@ -129,7 +152,7 @@ func (s *SecureSessionService) BeginSession(ctx context.Context, req *pb.BeginSe
 	return rep, nil
 }
 
-func (s *SecureSessionService) Handshake(ctx context.Context, req *pb.HandshakeRequest) (*pb.HandshakeResponse, error) {
+func (s *SecureSessionService) Handshake(ctx context.Context, req *sspb.HandshakeRequest) (*sspb.HandshakeResponse, error) {
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 
 	ch, found := s.channels[connID]
@@ -144,7 +167,7 @@ func (s *SecureSessionService) Handshake(ctx context.Context, req *pb.HandshakeR
 
 	ch.shim.QueueReceiveBuf(req.TlsRecords)
 
-	rep := &pb.HandshakeResponse{
+	rep := &sspb.HandshakeResponse{
 		TlsRecords: ch.shim.GetSendBufNonBlocking(),
 	}
 
@@ -152,7 +175,7 @@ func (s *SecureSessionService) Handshake(ctx context.Context, req *pb.HandshakeR
 	return rep, nil
 }
 
-func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *pb.NegotiateAttestationRequest) (*pb.NegotiateAttestationResponse, error) {
+func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *sspb.NegotiateAttestationRequest) (*sspb.NegotiateAttestationResponse, error) {
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
 
@@ -211,14 +234,14 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *pb
 		}
 	}()
 
-	rep := &pb.NegotiateAttestationResponse{}
+	rep := &sspb.NegotiateAttestationResponse{}
 	rep.RequiredEvidenceTypesRecords = ch.shim.GetSendBuf(0)
 
 	ch.state = ServerStateAttestationNegotiated
 	return rep, nil
 }
 
-func (s *SecureSessionService) Finalize(ctx context.Context, req *pb.FinalizeRequest) (*pb.FinalizeResponse, error) {
+func (s *SecureSessionService) Finalize(ctx context.Context, req *sspb.FinalizeRequest) (*sspb.FinalizeResponse, error) {
 
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
@@ -278,16 +301,126 @@ func (s *SecureSessionService) Finalize(ctx context.Context, req *pb.FinalizeReq
 	err := proto.Unmarshal(buf[AttestationPayloadOffset:offset], &clientAttEvidence)
 	if err != nil {
 		ch.state = ServerStateFailed
-		return nil, fmt.Errorf("failed to unmarshal AttestationEvidence: %v", err)
+		return nil, fmt.Errorf("failed to unmarshal AttestationEvidence: %w", err)
 	}
 
-	rep := &pb.FinalizeResponse{}
+	rep := &sspb.FinalizeResponse{}
 
 	ch.state = ServerStateAttestationAccepted
 	return rep, nil
 }
 
-func (s *SecureSessionService) EndSession(ctx context.Context, req *pb.EndSessionRequest) (*pb.EndSessionResponse, error) {
+// ConfidentialWrap wraps the aad and plaintext in the request by concatenating
+// them as (aad | key | plaintext).
+func (s *SecureSessionService) ConfidentialWrap(ctx context.Context, req *cwpb.ConfidentialWrapRequest) (*cwpb.ConfidentialWrapResponse, error) {
+	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
+	ch, found := s.channels[connID]
+
+	if !found {
+		return nil, fmt.Errorf("session with id: %v not found", connID)
+	}
+
+	if ch.state != ServerStateAttestationAccepted {
+		return nil, fmt.Errorf("session with id: %v in unexpected state for ConfidentialWrap: %d. Expecting: %d", connID, ch.state, ServerStateAttestationAccepted)
+	}
+
+	ch.shim.QueueReceiveBuf(req.TlsRecords)
+	buf := make([]byte, len(req.TlsRecords))
+
+	bufLen, err := ch.conn.Read(buf)
+	if err != nil {
+		return nil, fmt.Errorf("error reading WrapRequest from TLS records: %w", err)
+	}
+
+	wrapRequest := cwpb.WrapRequest{}
+	if err := proto.Unmarshal(buf[:bufLen], &wrapRequest); err != nil {
+		return nil, fmt.Errorf("failed to parse WrapRequest from TLS records: %w", err)
+	}
+
+	keyURI := fmt.Sprintf("%v%v", wrapRequest.GetKeyUriPrefix(), wrapRequest.GetKeyPath())
+	if _, found = s.keys[keyURI]; !found {
+		return nil, fmt.Errorf("key URI unknown by this server: %v", keyURI)
+	}
+
+	wrapResponse := cwpb.WrapResponse{}
+	wrapResponse.WrappedBlob = s.Wrap(keyURI, wrapRequest.GetAdditionalAuthenticatedData(), wrapRequest.GetPlaintext())
+
+	buf, err = proto.Marshal(&wrapResponse)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal server's WrapResponse: %w", err)
+	}
+
+	if _, err = ch.conn.Write(buf); err != nil {
+		return nil, fmt.Errorf("server failed to send WrapResponse via TLS connection: %w", err)
+	}
+
+	rep := &cwpb.ConfidentialWrapResponse{}
+	rep.TlsRecords = ch.shim.GetSendBuf(0)
+
+	return rep, nil
+}
+
+// ConfidentialUnwrap unwraps the given ciphertext with aad by splitting on the
+// first instance of the requested key. The expected format of the wrapped text
+// is (aad | key | plaintext). If the requested key is not present, or if the
+// first part of the split does not match the aad, the unwrapping fails and
+// returns an error. Otherwise, returns the determined plaintext.
+func (s *SecureSessionService) ConfidentialUnwrap(ctx context.Context, req *cwpb.ConfidentialUnwrapRequest) (*cwpb.ConfidentialUnwrapResponse, error) {
+	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
+	ch, found := s.channels[connID]
+
+	if !found {
+		return nil, fmt.Errorf("session with id: %v not found", connID)
+	}
+
+	if ch.state != ServerStateAttestationAccepted {
+		return nil, fmt.Errorf("session with id: %v in unexpected state: %d. Expecting: %d", connID, ch.state, ServerStateAttestationAccepted)
+	}
+
+	ch.shim.QueueReceiveBuf(req.TlsRecords)
+	buf := make([]byte, len(req.TlsRecords))
+	bufLen, err := ch.conn.Read(buf)
+	if err != nil {
+		return nil, fmt.Errorf("error reading UnwrapRequest from TLS Records %w", err)
+	}
+
+	unwrapRequest := cwpb.UnwrapRequest{}
+	if err := proto.Unmarshal(buf[:bufLen], &unwrapRequest); err != nil {
+		return nil, fmt.Errorf("failed to parse UnwrapRequest from TLS records: %w", err)
+	}
+
+	keyURI := fmt.Sprintf("%v%v", unwrapRequest.GetKeyUriPrefix(), unwrapRequest.GetKeyPath())
+	key, found := s.keys[keyURI]
+	if !found {
+		return nil, fmt.Errorf("key URI unknown by this server: %v", keyURI)
+	}
+
+	unwrapResponse := cwpb.UnwrapResponse{}
+	parts := bytes.SplitN(unwrapRequest.GetWrappedBlob(), []byte(key), 2)
+	if len(parts) != 2 {
+		return nil, fmt.Errorf("failed to decrypt wrapped blob")
+	}
+	if len(unwrapRequest.GetAdditionalAuthenticatedData()) != 0 && bytes.Compare(parts[0], unwrapRequest.GetAdditionalAuthenticatedData()) != 0 {
+		return nil, fmt.Errorf("failed to match additional authenticated data")
+	}
+	unwrapResponse.Plaintext = parts[1]
+
+	buf, err = proto.Marshal(&unwrapResponse)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal server's UnwrapResponse: %w", err)
+	}
+
+	if _, err = ch.conn.Write(buf); err != nil {
+		return nil, fmt.Errorf("server failed to send UnwrapResponse via TLS connection: %w", err)
+	}
+
+	rep := &cwpb.ConfidentialUnwrapResponse{}
+	rep.TlsRecords = ch.shim.GetSendBuf(0)
+
+	return rep, nil
+}
+
+func (s *SecureSessionService) EndSession(ctx context.Context, req *sspb.EndSessionRequest) (*sspb.EndSessionResponse, error) {
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
 
@@ -314,7 +447,7 @@ func (s *SecureSessionService) EndSession(ctx context.Context, req *pb.EndSessio
 		return nil, fmt.Errorf("End of session string mismatch")
 	}
 
-	rep := &pb.EndSessionResponse{}
+	rep := &sspb.EndSessionResponse{}
 
 	glog.Infof("EndSession: %v session ended.", connID)
 

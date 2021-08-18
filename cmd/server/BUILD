@@ -23,6 +23,7 @@ go_binary(
     srcs = ["main.go"],
     deps = [
         "//constants",
+        "//proto:confidential_wrap_go_proto",
         "//proto:secure_session_go_proto",
         "//server",
         "@com_github_golang_glog//:glog",

@@ -26,6 +26,7 @@ go_library(
     deps = [
         "//constants",
         "//proto:attestation_evidence_go_proto",
+        "//proto:confidential_wrap_go_proto",
         "//proto:secure_session_go_proto",
         "//transportshim",
         "@com_github_golang_glog//:glog",

@@ -21,8 +21,9 @@ import (
 
 	"flag"
 	"github.com/GoogleCloudPlatform/stet/constants"
-	pb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
-	serv "github.com/GoogleCloudPlatform/stet/server"
+	cwgrpc "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
+	ssgrpc "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
+	"github.com/GoogleCloudPlatform/stet/server"
 	glog "github.com/golang/glog"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/reflection"
@@ -47,9 +48,9 @@ func main() {
 	reflection.Register(grpcServer)
 
 	// Register a new SecureSessionService instance to handle RPCs.
-	serv, _ := serv.NewSecureSessionService()
-	pb.RegisterConfidentialEkmSessionEstablishmentServiceServer(grpcServer, serv)
-
+	serv, _ := server.NewSecureSessionService()
+	ssgrpc.RegisterConfidentialEkmSessionEstablishmentServiceServer(grpcServer, serv)
+	cwgrpc.RegisterConfidentialWrapUnwrapServiceServer(grpcServer, serv)
 	glog.Infof("Starting SecureSession server on port %v.", *port)
 	grpcServer.Serve(lis)
 }
