@@ -181,7 +181,8 @@ func newSecureSessionClient(addr string, opts ...grpc.DialOption) (*SecureSessio
 // beginSession starts the secure session establishment with the server.
 func (c *SecureSessionClient) beginSession(ctx context.Context) error {
 	req := &pb.BeginSessionRequest{
-		TlsRecords: c.shim.GetSendBuf(0),
+		// The buffer here is populated by the handshake in the newSecureSessionClient goroutine.
+		TlsRecords: c.shim.DrainSendBuf(),
 	}
 
 	resp, err := c.client.BeginSession(ctx, req)
@@ -208,7 +209,8 @@ func (c *SecureSessionClient) beginSession(ctx context.Context) error {
 func (c *SecureSessionClient) handshake(ctx context.Context) error {
 	req := &pb.HandshakeRequest{
 		SessionContext: c.ctx,
-		TlsRecords:     c.shim.GetSendBuf(0),
+		// The buffer here is populated by the handshake in the newSecureSessionClient goroutine.
+		TlsRecords: c.shim.DrainSendBuf(),
 	}
 
 	resp, err := c.client.Handshake(ctx, req)
@@ -255,7 +257,7 @@ func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
 	}
 
 	// Capture the TLS session-protected records and send them over the RPC.
-	req.OfferedEvidenceTypesRecords = c.shim.GetSendBuf(0)
+	req.OfferedEvidenceTypesRecords = c.shim.DrainSendBuf()
 
 	resp, err := c.client.NegotiateAttestation(ctx, req)
 	if err != nil {
@@ -362,7 +364,7 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 	}
 
 	// Wait for TLS session to process, then add session-protected records to request.
-	req.AttestationEvidenceRecords = c.shim.GetSendBuf(len(records))
+	req.AttestationEvidenceRecords = c.shim.DrainSendBuf()
 
 	if _, err := c.client.Finalize(ctx, req); err != nil {
 		return fmt.Errorf("error finalizing secure session with client: %v", err)
@@ -386,7 +388,7 @@ func (c *SecureSessionClient) EndSession(ctx context.Context) error {
 	// Send the session-encrypted string over the network to end the session.
 	req := &pb.EndSessionRequest{
 		SessionContext: c.ctx,
-		TlsRecords:     c.shim.GetSendBuf(0),
+		TlsRecords:     c.shim.DrainSendBuf(),
 	}
 
 	if _, err := c.client.EndSession(ctx, req); err != nil {
@@ -427,7 +429,7 @@ func (c *SecureSessionClient) ConfidentialWrap(ctx context.Context, keyPath, res
 
 	req := &cwpb.ConfidentialWrapRequest{
 		SessionContext: c.ctx,
-		TlsRecords:     c.shim.GetSendBuf(0),
+		TlsRecords:     c.shim.DrainSendBuf(),
 		RequestMetadata: &cwpb.RequestMetadata{
 			KeyPath:           wrapReq.GetKeyPath(),
 			KeyUriPrefix:      wrapReq.GetKeyUriPrefix(),
@@ -489,7 +491,7 @@ func (c *SecureSessionClient) ConfidentialUnwrap(ctx context.Context, keyPath, r
 
 	req := &cwpb.ConfidentialUnwrapRequest{
 		SessionContext: c.ctx,
-		TlsRecords:     c.shim.GetSendBuf(0),
+		TlsRecords:     c.shim.DrainSendBuf(),
 		RequestMetadata: &cwpb.RequestMetadata{
 			KeyPath:           unwrapReq.GetKeyPath(),
 			KeyUriPrefix:      unwrapReq.GetKeyUriPrefix(),

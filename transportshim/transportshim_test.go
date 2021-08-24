@@ -31,14 +31,14 @@ func TestShimSend(t *testing.T) {
 		}
 	}()
 
-	// GetSendBuf will block until data becomes available
-	if string(shim.GetSendBuf(0)) != fromServerMsg {
+	// DrainSendBuf will block until data becomes available
+	if string(shim.DrainSendBuf()) != fromServerMsg {
 		t.Fatalf("Expected server msg to match")
 	}
 }
 
 // Test writing a large number of bytes to `sendBuf` in chunks and reading
-// reading them off via GetSendBuf, making use of the length suggestion.
+// reading them off via DrainSendBuf, making use of the length suggestion.
 func TestShimLargeWrite(t *testing.T) {
 	// 2^15 bytes is around the size of a full vTPM attestation.
 	attestationLen := 32768
@@ -65,7 +65,7 @@ func TestShimLargeWrite(t *testing.T) {
 		}
 	}()
 
-	res := shim.GetSendBuf(attestationLen)
+	res := shim.DrainSendBuf()
 	var got []byte
 	recordLen := sliceLen + overhead
 

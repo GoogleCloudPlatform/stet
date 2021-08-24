@@ -21,7 +21,7 @@ import (
 // ShimInterface handles shuttling data for net.Conn for use case like TLS exchange.
 type ShimInterface interface {
 	net.Conn
-	GetSendBuf(int) []byte
-	GetSendBufNonBlocking() []byte
+	DrainSendBuf() []byte
+	DrainSendBufNonBlocking() []byte
 	QueueReceiveBuf([]byte)
 }

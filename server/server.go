@@ -147,7 +147,7 @@ func (s *SecureSessionService) BeginSession(ctx context.Context, req *sspb.Begin
 
 	rep := &sspb.BeginSessionResponse{
 		SessionContext: ch.connID,
-		TlsRecords:     ch.shim.GetSendBuf(0),
+		TlsRecords:     ch.shim.DrainSendBuf(),
 	}
 
 	ch.state = ServerStateInitiated
@@ -172,7 +172,7 @@ func (s *SecureSessionService) Handshake(ctx context.Context, req *sspb.Handshak
 	ch.shim.QueueReceiveBuf(req.TlsRecords)
 
 	rep := &sspb.HandshakeResponse{
-		TlsRecords: ch.shim.GetSendBufNonBlocking(),
+		TlsRecords: ch.shim.DrainSendBufNonBlocking(),
 	}
 
 	ch.state = ServerStateHandshakeCompleted
@@ -239,7 +239,7 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 	}()
 
 	rep := &sspb.NegotiateAttestationResponse{}
-	rep.RequiredEvidenceTypesRecords = ch.shim.GetSendBuf(0)
+	rep.RequiredEvidenceTypesRecords = ch.shim.DrainSendBuf()
 
 	ch.state = ServerStateAttestationNegotiated
 	return rep, nil
@@ -359,7 +359,7 @@ func (s *SecureSessionService) ConfidentialWrap(ctx context.Context, req *cwpb.C
 	}
 
 	rep := &cwpb.ConfidentialWrapResponse{}
-	rep.TlsRecords = ch.shim.GetSendBuf(0)
+	rep.TlsRecords = ch.shim.DrainSendBuf()
 
 	return rep, nil
 }
@@ -419,7 +419,7 @@ func (s *SecureSessionService) ConfidentialUnwrap(ctx context.Context, req *cwpb
 	}
 
 	rep := &cwpb.ConfidentialUnwrapResponse{}
-	rep.TlsRecords = ch.shim.GetSendBuf(0)
+	rep.TlsRecords = ch.shim.DrainSendBuf()
 
 	return rep, nil
 }

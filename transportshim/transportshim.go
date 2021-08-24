@@ -78,33 +78,31 @@ func (shim *TransportShim) Read(b []byte) (n int, err error) {
 	return len(b), nil
 }
 
-// GetSendBuf returns records from `sendBuf` to be sent to the counterparty
+// DrainSendBuf returns records from `sendBuf` to be sent to the counterparty
 // (over some transport, i.e., gRPC). Will block until Write is invoked with
 // data to be sent to the counterparty.
-func (shim *TransportShim) GetSendBuf(ptLen int) []byte {
-	const recOverhead = 12
-	bTotal := make([]byte, 0)
+func (shim *TransportShim) DrainSendBuf() []byte {
+	// Block until at least one slice of bytes is available in the sendBuf channel.
+	ret := <-shim.sendBuf
 
-	bActualLen := 0
-	for b := range shim.sendBuf {
-		bTotal = append(bTotal, b...)
-		bActualLen += len(b) - recOverhead
-
-		if ptLen == 0 || bActualLen >= ptLen {
-			break
+	// Then, exhaust the remainder of the channel.
+	for {
+		select {
+		case b := <-shim.sendBuf:
+			ret = append(ret, b...)
+		default:
+			return ret
 		}
 	}
-
-	return bTotal
 }
 
-// GetSendBufNonBlocking reads from `sendBuf` without blocking.
-func (shim *TransportShim) GetSendBufNonBlocking() []byte {
+// DrainSendBufNonBlocking reads from `sendBuf` without blocking.
+func (shim *TransportShim) DrainSendBufNonBlocking() []byte {
 	select {
 	case b := <-shim.sendBuf:
 		return b
 	default:
-		return make([]byte, 0)
+		return nil
 	}
 }
 
