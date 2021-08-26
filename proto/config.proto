@@ -23,9 +23,31 @@ enum DekAlgorithm {
   AES256_GCM = 1;
 }
 
+message AsymmetricKey {
+  enum Algorithm {
+    UNKNOWN_ALGORITHM = 0;
+    RSA = 1;
+  }
+
+  string fingerprint = 1;
+
+  // The algorithm of the keypair.
+  Algorithm algorithm = 2;
+}
+
 message KekInfo {
-  // The URI of the Key Encryption Key.
-  string kek_uri = 1;
+  oneof kek_type {
+    // The URI of the Key Encryption Key.
+    string kek_uri = 1;
+
+    // The SHA-256 fingerprint of the DER-encoded public key corresponding to
+    // an RSA keypair generated for the purposes of offline share encryption.
+    //
+    // Can be generated from a private key PEM with the following command:
+    // $ openssl rsa -in test.pem -pubout -outform DER | \
+    //     openssl sha256 -binary | openssl base64
+    string rsa_fingerprint = 2;
+  }
 }
 
 message ShamirConfig {
@@ -59,6 +81,7 @@ message KeyConfig {
 message StetConfig {
   EncryptConfig encrypt_config = 1;
   DecryptConfig decrypt_config = 2;
+  AsymmetricKeys asymmetric_keys = 3;
 }
 
 message EncryptConfig {
@@ -70,6 +93,16 @@ message DecryptConfig {
   // The set of KeyConfigs that are known to the client. The decryption logic
   // will look to figure out which KeyConfig matches the hashed config_id.
   repeated KeyConfig key_configs = 1;
+}
+
+message AsymmetricKeys {
+  // A list of paths to PEM-encoded public keys corresponding to any
+  // AsymmetricKey messages specified in a KekInfo for encryption.
+  repeated string public_key_files = 1;
+
+  // A list of paths to PEM-encoded private keys corresponding to any
+  // AsymmetricKey messages specified in a KekInfo for decryption.
+  repeated string private_key_files = 2;
 }
 
 // The metadata needed to store alongside encrypted data.

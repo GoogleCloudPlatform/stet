@@ -134,7 +134,7 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 	// Initialize StetClient and encrypt plaintext.
 	c := client.StetClient{}
 
-	encryptedData, err := c.Encrypt(ctx, plaintext, stetConfig.GetEncryptConfig(), e.blobID)
+	encryptedData, err := c.Encrypt(ctx, plaintext, stetConfig.GetEncryptConfig(), stetConfig.GetAsymmetricKeys(), e.blobID)
 	if err != nil {
 		glog.Errorf("Failed to encrypt plaintext: %v", err.Error())
 		return subcommands.ExitFailure
@@ -295,7 +295,7 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		return subcommands.ExitFailure
 	}
 
-	decryptedData, err := c.Decrypt(ctx, encryptedData, stetConfig.GetDecryptConfig())
+	decryptedData, err := c.Decrypt(ctx, encryptedData, stetConfig.GetDecryptConfig(), stetConfig.GetAsymmetricKeys())
 	if err != nil {
 		glog.Errorf("Failed to decrypt ciphertext: %v", err.Error())
 		return subcommands.ExitFailure
@@ -329,7 +329,9 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 
 		// Debug information to guard against authorship attacks.
 		logFile.WriteString(fmt.Sprintln("Blob ID of decrypted data:", decryptedData.BlobID))
-		logFile.WriteString(fmt.Sprintln("Used these key URIs:", decryptedData.KeyUris))
+		if len(decryptedData.KeyUris) > 0 {
+			logFile.WriteString(fmt.Sprintln("Used these key URIs:", decryptedData.KeyUris))
+		}
 	}
 
 	return subcommands.ExitSuccess

@@ -65,6 +65,7 @@ go_test(
     size = "small",
     srcs = [
         "aead_test.go",
+        "client_keys_test.go",
         "client_test.go",
         "dek_test.go",
         "metadata_test.go",

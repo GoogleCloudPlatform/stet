@@ -17,9 +17,16 @@ package client
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
+	"crypto/x509"
+	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"hash/crc32"
 	"net/url"
+	"os"
 	"path"
 	"strings"
 
@@ -61,11 +68,36 @@ type secureSessionClient interface {
 
 // StetClient provides Encryption and Decryption services through the Split Trust Encryption Tool.
 type StetClient struct {
+	// Client for performing Cloud KMS operations. Initialized via initializeKMSClient.
+	kmsClient cloudKMSClient
+
 	// Fake Cloud KMS Client for testing purposes.
 	fakeKeyManagementClient cloudKMSClient
 
 	// Fake Secure Session Client for testing purposes.
 	fakeSecureSessionClient secureSessionClient
+}
+
+// initializeKMSClient initializes the StetClient's `kmsClient`.
+// Performs a no-op if it has already been initialized.
+func (c *StetClient) initializeKMSClient(ctx context.Context) error {
+	// Don't double-initialize a real KMS client.
+	if c.kmsClient != nil {
+		return nil
+	}
+
+	// Use the fake key management client if one was configured, otherwise initialize a real one.
+	if c.fakeKeyManagementClient != nil {
+		c.kmsClient = c.fakeKeyManagementClient
+	} else {
+		var err error
+		c.kmsClient, err = kms.NewKeyManagementClient(ctx)
+		if err != nil {
+			return fmt.Errorf("error creating KMS client: %v", err)
+		}
+	}
+
+	return nil
 }
 
 // setFakeKeyManagementClient allows a fake Cloud KMS client to be configured for testing purposes.
@@ -274,29 +306,47 @@ func protectionLevelsAndUris(ctx context.Context, kmsClient cloudKMSClient, kekI
 	return kekMetadatas, nil
 }
 
-// wrapShares encrypts the given shares based on their URIs.
-func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, kekInfos []*configpb.KekInfo) ([]*configpb.WrappedShare, error) {
-	var kmsClient cloudKMSClient
-	// Use the fake key management client if one was configured, otherwise initialize a real one.
-	if c.fakeKeyManagementClient != nil {
-		kmsClient = c.fakeKeyManagementClient
-	} else {
-		var err error
-		kmsClient, err = kms.NewKeyManagementClient(ctx)
+// Iterates through the public keys defined in `keys`, searching for one that
+// matches `kek`. If one is found, returns it, otherwise returns nil.
+func publicKeyForRSAFingerprint(kek *configpb.KekInfo, keys *configpb.AsymmetricKeys) (*rsa.PublicKey, error) {
+	for _, path := range keys.GetPublicKeyFiles() {
+		keyBytes, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("error creating KMS client: %v", err)
+			return nil, fmt.Errorf("failed to open public key file: %w", err)
+		}
+
+		block, _ := pem.Decode(keyBytes)
+		if block == nil || block.Type != "PUBLIC KEY" {
+			return nil, fmt.Errorf("failed to decode PEM block containing public key")
+		}
+
+		pub, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse public key from PEM: %v", err)
+		}
+		key, ok := pub.(*rsa.PublicKey)
+		if !ok {
+			return nil, fmt.Errorf("failed to parse RSA public key: %v", err)
+		}
+		// Compute SHA-256 digest of the DER-encoded public key.
+		sha := sha256.Sum256(block.Bytes)
+		fingerprint := base64.StdEncoding.EncodeToString(sha[:])
+		if fingerprint == kek.GetRsaFingerprint() {
+			return key, nil
 		}
 	}
-	defer kmsClient.Close()
 
+	return nil, fmt.Errorf("no RSA public key found for fingerprint: %s", kek.GetRsaFingerprint())
+}
+
+// wrapShares encrypts the given shares based on their URIs.
+func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, kekInfos []*configpb.KekInfo, keys *configpb.AsymmetricKeys) ([]*configpb.WrappedShare, error) {
 	if len(unwrappedShares) != len(kekInfos) {
 		return nil, fmt.Errorf("number of shares to wrap (%d) does not match number of KEKs (%d)", len(unwrappedShares), len(kekInfos))
 	}
 
-	kekMetadatas, err := protectionLevelsAndUris(ctx, kmsClient, kekInfos)
-	if err != nil {
-		return nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
-	}
+	// Gets populated once the first non-local key is seen.
+	var kekMetadatas []kekMetadata
 
 	var wrappedShares []*configpb.WrappedShare
 	for i, share := range unwrappedShares {
@@ -304,21 +354,55 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 			Hash: HashShare(share),
 		}
 
-		switch pl := kekMetadatas[i].protectionLevel; pl {
-		case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
-			wrapped.Share, err = wrapKMSShare(ctx, kmsClient, share, kekMetadatas[i].resourceName)
+		kek := kekInfos[i]
+
+		switch x := kek.KekType.(type) {
+		case *configpb.KekInfo_RsaFingerprint:
+			key, err := publicKeyForRSAFingerprint(kek, keys)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find public key for RSA fingerprint: %w", err)
+			}
+
+			wrapped.Share, err = rsa.EncryptOAEP(sha256.New(), rand.Reader, key, share, nil)
 			if err != nil {
 				return nil, fmt.Errorf("error wrapping key share: %v", err)
 			}
-		case rpb.ProtectionLevel_EXTERNAL:
-			ekmWrappedShare, err := c.ekmSecureSessionWrap(ctx, share, kekMetadatas[i])
-			if err != nil {
-				return nil, fmt.Errorf("error wrapping with secure session: %v", err)
+
+		case *configpb.KekInfo_KekUri:
+			// Instantiate `kmsClient` and populate `kekMetadatas` if not already done.
+			if err := c.initializeKMSClient(ctx); err != nil {
+				return nil, fmt.Errorf("error initializing KMS Client: %v", err)
+			}
+			defer c.kmsClient.Close()
+
+			if kekMetadatas == nil {
+				var err error
+				kekMetadatas, err = protectionLevelsAndUris(ctx, c.kmsClient, kekInfos)
+				if err != nil {
+					return nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
+				}
 			}
 
-			wrapped.Share = ekmWrappedShare
+			// Wrap share via KMS.
+			switch pl := kekMetadatas[i].protectionLevel; pl {
+			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
+				var err error
+				wrapped.Share, err = wrapKMSShare(ctx, c.kmsClient, share, kekMetadatas[i].resourceName)
+				if err != nil {
+					return nil, fmt.Errorf("error wrapping key share: %v", err)
+				}
+			case rpb.ProtectionLevel_EXTERNAL:
+				ekmWrappedShare, err := c.ekmSecureSessionWrap(ctx, share, kekMetadatas[i])
+				if err != nil {
+					return nil, fmt.Errorf("error wrapping with secure session: %v", err)
+				}
+
+				wrapped.Share = ekmWrappedShare
+			default:
+				return nil, fmt.Errorf("unsupported protection level %v", pl)
+			}
 		default:
-			return nil, fmt.Errorf("unsupported protection level %v", pl)
+			return nil, fmt.Errorf("unsupported KekInfo type: %v", x)
 		}
 
 		wrappedShares = append(wrappedShares, wrapped)
@@ -346,46 +430,99 @@ func unwrapKMSShare(ctx context.Context, kmsClient cloudKMSClient, wrappedShare 
 	return result.Plaintext, nil
 }
 
-// unwrapAndValidateShares decrypts the given wrapped share based on its URI.
-func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares []*configpb.WrappedShare, kekInfos []*configpb.KekInfo) ([][]byte, error) {
-	var kmsClient cloudKMSClient
-	// Use the fake key management client if one was configured, otherwise initialize a real one.
-	if c.fakeKeyManagementClient != nil {
-		kmsClient = c.fakeKeyManagementClient
-	} else {
-		var err error
-		kmsClient, err = kms.NewKeyManagementClient(ctx)
+// Iterates through the private keys defined in `keys`, searching for one that
+// matches `kek`. If one is found, returns it, otherwise returns nil.
+func privateKeyForRSAFingerprint(kek *configpb.KekInfo, keys *configpb.AsymmetricKeys) (*rsa.PrivateKey, error) {
+	for _, path := range keys.GetPrivateKeyFiles() {
+		keyBytes, err := os.ReadFile(path)
 		if err != nil {
-			return nil, fmt.Errorf("error creating KMS client: %v", err)
+			return nil, fmt.Errorf("failed to open private key file: %w", err)
+		}
+
+		block, _ := pem.Decode(keyBytes)
+		if block == nil || block.Type != "RSA PRIVATE KEY" {
+			return nil, fmt.Errorf("failed to decode PEM block containing RSA private key")
+		}
+
+		key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse PKCS1 private key from PEM: %v", err)
+		}
+
+		// Compute SHA-256 digest of the DER-encoded public key.
+		der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
+		if err != nil {
+			return nil, fmt.Errorf("failed to marshal public key from private key: %w", err)
+		}
+		sha := sha256.Sum256(der)
+		fingerprint := base64.StdEncoding.EncodeToString(sha[:])
+		if fingerprint == kek.GetRsaFingerprint() {
+			return key, nil
 		}
 	}
-	defer kmsClient.Close()
 
+	return nil, fmt.Errorf("no RSA private key found for fingerprint: %s", kek.GetRsaFingerprint())
+}
+
+// unwrapAndValidateShares decrypts the given wrapped share based on its URI.
+func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares []*configpb.WrappedShare, kekInfos []*configpb.KekInfo, keys *configpb.AsymmetricKeys) ([][]byte, error) {
 	if len(wrappedShares) != len(kekInfos) {
 		return nil, fmt.Errorf("number of shares to unwrap (%d) does not match number of KEKs (%d)", len(wrappedShares), len(kekInfos))
 	}
 
-	kekMetadatas, err := protectionLevelsAndUris(ctx, kmsClient, kekInfos)
-	if err != nil {
-		return nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
-	}
+	// Gets populated once the first non-local key is seen.
+	var kekMetadatas []kekMetadata
 
 	var unwrappedShares [][]byte
 	for i, wrapped := range wrappedShares {
 		var unwrapped []byte
-		switch pl := kekMetadatas[i].protectionLevel; pl {
-		case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
-			unwrapped, err = unwrapKMSShare(ctx, kmsClient, wrapped.GetShare(), kekMetadatas[i].resourceName)
+		kek := kekInfos[i]
+
+		switch x := kek.KekType.(type) {
+		case *configpb.KekInfo_RsaFingerprint:
+			key, err := privateKeyForRSAFingerprint(kek, keys)
+			if err != nil {
+				return nil, fmt.Errorf("failed to find public key for RSA fingerprint: %w", err)
+			}
+
+			unwrapped, err = rsa.DecryptOAEP(sha256.New(), rand.Reader, key, wrapped.GetShare(), nil)
 			if err != nil {
 				return nil, fmt.Errorf("error unwrapping key share: %v", err)
 			}
-		case rpb.ProtectionLevel_EXTERNAL:
-			unwrapped, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), kekMetadatas[i])
-			if err != nil {
-				return nil, fmt.Errorf("error unwrapping with external EKM for %v: %v", kekMetadatas[i].uri, err)
+
+		case *configpb.KekInfo_KekUri:
+			// Instantiate `kmsClient` and populate `kekMetadatas` if not already done.
+			if err := c.initializeKMSClient(ctx); err != nil {
+				return nil, fmt.Errorf("error initializing KMS Client: %v", err)
+			}
+			defer c.kmsClient.Close()
+
+			if kekMetadatas == nil {
+				var err error
+				kekMetadatas, err = protectionLevelsAndUris(ctx, c.kmsClient, kekInfos)
+				if err != nil {
+					return nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
+				}
+			}
+
+			// Unwrap share via KMS.
+			var err error
+			switch pl := kekMetadatas[i].protectionLevel; pl {
+			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
+				unwrapped, err = unwrapKMSShare(ctx, c.kmsClient, wrapped.GetShare(), kekMetadatas[i].resourceName)
+				if err != nil {
+					return nil, fmt.Errorf("error unwrapping key share: %v", err)
+				}
+			case rpb.ProtectionLevel_EXTERNAL:
+				unwrapped, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), kekMetadatas[i])
+				if err != nil {
+					return nil, fmt.Errorf("error unwrapping with external EKM for %v: %v", kekMetadatas[i].uri, err)
+				}
+			default:
+				return nil, fmt.Errorf("unsupported protection level %v", pl)
 			}
 		default:
-			return nil, fmt.Errorf("unsupported protection level %v", pl)
+			return nil, fmt.Errorf("unsupported KekInfo type: %v", x)
 		}
 
 		if !ValidateShare(unwrapped, wrapped.GetHash()) {
@@ -399,7 +536,7 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 }
 
 // Encrypt generates a DEK and creates EncryptedData in accordance with the EKM encryption protocol.
-func (c *StetClient) Encrypt(ctx context.Context, plaintext []byte, config *configpb.EncryptConfig, blobID string) (*configpb.EncryptedData, error) {
+func (c *StetClient) Encrypt(ctx context.Context, plaintext []byte, config *configpb.EncryptConfig, keys *configpb.AsymmetricKeys, blobID string) (*configpb.EncryptedData, error) {
 	// Create metadata.
 	metadata := &configpb.Metadata{}
 
@@ -451,7 +588,7 @@ func (c *StetClient) Encrypt(ctx context.Context, plaintext []byte, config *conf
 	metadata.KeyConfig = keyCfg
 
 	var err error
-	metadata.Shares, err = c.wrapShares(ctx, shares, keyCfg.GetKekInfos())
+	metadata.Shares, err = c.wrapShares(ctx, shares, keyCfg.GetKekInfos(), keys)
 	if err != nil {
 		return nil, fmt.Errorf("Error wrapping shares: %v", err)
 	}
@@ -475,7 +612,7 @@ func (c *StetClient) Encrypt(ctx context.Context, plaintext []byte, config *conf
 
 // Decrypt returns the plaintext as bytes, the key URIs used during decryption,
 // and the blob ID decrypted.
-func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, config *configpb.DecryptConfig) (*DecryptedData, error) {
+func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, config *configpb.DecryptConfig, keys *configpb.AsymmetricKeys) (*DecryptedData, error) {
 	// Find matching KeyConfig.
 	var matchingKeyConfig *configpb.KeyConfig
 
@@ -491,7 +628,7 @@ func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, 
 	}
 
 	// Unwrap shares and validate.
-	unwrappedShares, err := c.unwrapAndValidateShares(ctx, data.Metadata.GetShares(), matchingKeyConfig.GetKekInfos())
+	unwrappedShares, err := c.unwrapAndValidateShares(ctx, data.Metadata.GetShares(), matchingKeyConfig.GetKekInfos(), keys)
 	if err != nil {
 		return nil, fmt.Errorf("error unwrapping and validating shares: %v", err)
 	}
@@ -543,7 +680,10 @@ func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, 
 	var keyURIs []string
 	for _, kcfg := range config.GetKeyConfigs() {
 		for _, uri := range kcfg.GetKekInfos() {
-			keyURIs = append(keyURIs, uri.GetKekUri())
+			switch uri.GetKekType().(type) {
+			case *configpb.KekInfo_KekUri:
+				keyURIs = append(keyURIs, uri.GetKekUri())
+			}
 		}
 	}
 

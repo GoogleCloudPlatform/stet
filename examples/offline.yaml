@@ -1,0 +1,19 @@
+encrypt_config:
+  key_config:
+    kek_infos:
+    - rsa_fingerprint: "<SHA-256 hash of the DER-encoded public key>"
+    dek_algorithm: AES256_GCM
+    no_split: true
+
+decrypt_config:
+  key_configs:
+  - kek_infos:  # Note the extra hyphen here, because key_configs is a repeated field.
+    - rsa_fingerprint: "<SHA-256 hash of the DER-encoded public key>"
+    dek_algorithm: AES256_GCM
+    no_split: true
+
+asymmetric_keys:
+  public_key_files:
+  - "/usr/local/my_key.pub"
+  private_key_files:
+  - "/usr/local/my_key"
