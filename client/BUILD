@@ -23,6 +23,7 @@ go_library(
     srcs = [
         "aead.go",
         "client.go",
+        "confidentialekmclient.go",
         "dek.go",
         "jwt.go",
         "metadata.go",
@@ -54,6 +55,7 @@ go_library(
         "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
         "@go_googleapis//google/iam/credentials/v1:credentials_go_proto",
         "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_protobuf//encoding/protojson",
         "@org_golang_google_protobuf//proto",
         "@org_golang_google_protobuf//types/known/wrapperspb",
         "@org_golang_x_oauth2//google:go_default_library",
@@ -67,6 +69,7 @@ go_test(
         "aead_test.go",
         "client_keys_test.go",
         "client_test.go",
+        "confidentialekmclient_test.go",
         "dek_test.go",
         "metadata_test.go",
         "shamir_test.go",
@@ -76,10 +79,13 @@ go_test(
     deps = [
         "//proto:confidential_wrap_go_proto",
         "//proto:config_go_proto",
+        "//proto:secure_session_go_proto",
         "@com_github_google_tink_go//subtle/random:go_default_library",
         "@com_github_googleapis_gax_go_v2//:go_default_library",
         "@com_google_cloud_go//kms/apiv1:go_default_library",
         "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
+        "@org_golang_google_protobuf//encoding/protojson",
+        "@org_golang_google_protobuf//proto",
         "@org_golang_google_protobuf//types/known/wrapperspb",
     ],
 )
