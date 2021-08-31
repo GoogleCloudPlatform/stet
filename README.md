@@ -160,6 +160,55 @@ decrypt_config:
       threshold: 2
 ```
 
+#### Generating asymmetric keypairs for offline encryption
+
+Another method of wrapping shares is to generate an asymmetric keypair locally.
+In your STET configuration file, you can specify the fingerprint of the keypair
+rather than the URI of a KMS-stored key and add another stanza describing the
+path to the public/private keys on disk.
+
+Generate a private, 2048-bit RSA key:
+
+```
+$ openssl genrsa -out my_key.pem 2048
+```
+
+Create a public key file from that private key:
+
+```
+$ openssl rsa -in my_key.pem -pubout -out my_key.pub
+```
+
+Compute the fingerprint of the keypair:
+
+```
+$ openssl rsa -in stet.pem -pubout -outform DER | openssl sha256 -binary | openssl base64
+```
+
+Here is an example config file that encrypts data using a single RSA key:
+
+```yaml
+encrypt_config:
+  key_config:
+    kek_infos:
+    - rsa_fingerprint: "0FkfGnh4KEUBJGLoLUEcIIFTdlcx61ec1M/H2Gdh7tY="
+    dek_algorithm: AES256_GCM
+    no_split: true
+
+decrypt_config:
+  key_configs:
+  - kek_infos:
+    - rsa_fingerprint: "0FkfGnh4KEUBJGLoLUEcIIFTdlcx61ec1M/H2Gdh7tY="
+    dek_algorithm: AES256_GCM
+    no_split: true
+
+asymmetric_keys:
+  public_key_files:
+  - "/home/me/stet.pub"
+  private_key_files:
+  - "/home/me/stet.pem"
+```
+
 ### Execute STET
 
 Example invocations:
