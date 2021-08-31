@@ -78,16 +78,19 @@ Currently, only AES256-GCM is supported.
 #### Key Splitting Algorithm
 
 This indicates the number of shares the split the DEK into - if at all. It
-requires **exactly one** of the following fields to be defined: * `no_split:
-true` indicates the DEK will not be split into any shares. * The `key_config`
-should contain a single `kek_infos` indicating the KEK to encrypt/decrypt the
-entire DEK with * `shamir` indicates the DEK will be split into multiple shares
-using Shamir's Secret Sharing. Each share will be encrypted/decrypted with a
-separate KEK. This configuration requires two fields to be defined: * `shares`
-defines the total number of shares to split the DEK into. * `threshold` defines
-the minimum number of shares needed to reconstitute the DEK during decryption. *
-The `key_config` should contain a number of `kek_infos` equal to the values of
-`shares`
+requires **exactly one** of the following fields to be defined:
+
+*   `no_split: true` indicates the DEK will not be split into any shares.
+    *   The `key_config` should contain a single `kek_infos` indicating the KEK
+        to encrypt/decrypt the entire DEK with
+*   `shamir` indicates the DEK will be split into multiple shares using Shamir's
+    Secret Sharing. Each share will be encrypted/decrypted with a separate KEK.
+    This configuration requires two fields to be defined:
+    *   `shares` defines the total number of shares to split the DEK into.
+    *   `threshold` defines the minimum number of shares needed to reconstitute
+        the DEK during decryption.
+    *   The `key_config` should contain a number of `kek_infos` equal to the
+        values of `shares`
 
 #### Examples
 
