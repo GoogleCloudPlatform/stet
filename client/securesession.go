@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"syscall"
 
 	"cloud.google.com/go/compute/metadata"
 	tpmclient "github.com/google/go-tpm-tools/client"
@@ -84,6 +85,32 @@ type SecureSessionClient struct {
 	state            clientState
 	ctx              []byte // the opaque session context
 	attestationTypes *aepb.AttestationEvidenceTypeList
+}
+
+// tryReescalatePrivileges checks if the process is owned by root but
+// invoked as user, and the real UID is currently 0 (with non-zero
+// effective UID). If so, it attempts to swap the two, thus escalating
+// back to root privileges, returning an error if any syscalls fail.
+func tryReescalatePrivileges() error {
+	ruid := syscall.Getuid()
+	euid := syscall.Geteuid()
+	if ruid == 0 && euid != 0 {
+		return syscall.Setreuid(euid, ruid)
+	}
+	return nil
+}
+
+// tryDescalatePrivileges checks if the process is owned by root but
+// invoked as user, and the effective UID is 0 (with non-zero real UID).
+// If so, it attempts to swap the two, thus de-escalating down to user
+// privileges, returning an error if any syscalls fail.
+func tryDeescalatePrivileges() error {
+	ruid := syscall.Getuid()
+	euid := syscall.Geteuid()
+	if ruid != 0 && euid == 0 {
+		return syscall.Setreuid(euid, ruid)
+	}
+	return nil
 }
 
 // EstablishSecureSession takes in a service address and performs the
@@ -238,12 +265,21 @@ func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
 
 	evidenceTypes := &aepb.AttestationEvidenceTypeList{}
 
+	// Attempt to re-escalate execution privileges.
+	if err := tryReescalatePrivileges(); err != nil {
+		glog.Fatalf("Failed to re-escalate to root privileges to open TPM device: %s", err.Error())
+	}
+
 	if _, err := tpm2.OpenTPM("/dev/tpmrm0"); err != nil {
 		glog.Infof("TPM not available. Using null attestation")
 		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_NULL_ATTESTATION)
 	} else {
 		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_TPM2_QUOTE)
 		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_TCG_EVENT_LOG)
+	}
+
+	if err := tryDeescalatePrivileges(); err != nil {
+		glog.Fatalf("Failed to de-escalate to user privileges: %s", err.Error())
 	}
 
 	// Write marshalled attestation evidence to TLS channel.
@@ -304,6 +340,11 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 		Attestation: &atpb.Attestation{},
 	}
 
+	// Attempt to re-escalate execution privileges.
+	if err := tryReescalatePrivileges(); err != nil {
+		glog.Fatalf("Failed to re-escalate to root privileges to generate attestation: %s", err.Error())
+	}
+
 	if rwc, err := tpm2.OpenTPM("/dev/tpmrm0"); err == nil {
 		ek, err := tpmclient.GceAttestationKeyRSA(rwc)
 		if err != nil {
@@ -345,6 +386,10 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 		evidence = aepb.AttestationEvidence{
 			Attestation: att,
 		}
+	}
+
+	if err := tryDeescalatePrivileges(); err != nil {
+		glog.Fatalf("Failed to de-escalate to user privileges: %s", err.Error())
 	}
 
 	// Marshal evidence.

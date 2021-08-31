@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"syscall"
 
 	"flag"
 	"github.com/GoogleCloudPlatform/stet/client"
@@ -338,6 +339,18 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 }
 
 func main() {
+	// If effective UID is 0 and real UID != 0, we invoked as user but need to descalate.
+	euid := syscall.Geteuid()
+	ruid := syscall.Getuid()
+	if euid == 0 && ruid != 0 {
+		// This means we are root. Swap the real and effective UIDs to de-escalate until
+		// we need to re-escalate (as part of generating attestations).
+		err := syscall.Setreuid(euid, ruid)
+		if err != nil {
+			glog.Fatalf("Failed to deescalate from root to user: %s", err.Error())
+		}
+	}
+
 	flag.Parse()
 
 	subcommands.Register(subcommands.HelpCommand(), "")
