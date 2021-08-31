@@ -267,7 +267,7 @@ func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
 
 	// Attempt to re-escalate execution privileges.
 	if err := tryReescalatePrivileges(); err != nil {
-		glog.Fatalf("Failed to re-escalate to root privileges to open TPM device: %s", err.Error())
+		return fmt.Errorf("failed to re-escalate to root privileges to open TPM device: %w", err)
 	}
 
 	if _, err := tpm2.OpenTPM("/dev/tpmrm0"); err != nil {
@@ -279,7 +279,7 @@ func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
 	}
 
 	if err := tryDeescalatePrivileges(); err != nil {
-		glog.Fatalf("Failed to de-escalate to user privileges: %s", err.Error())
+		return fmt.Errorf("failed to de-escalate to user privileges: %w", err)
 	}
 
 	// Write marshalled attestation evidence to TLS channel.
@@ -342,7 +342,7 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 
 	// Attempt to re-escalate execution privileges.
 	if err := tryReescalatePrivileges(); err != nil {
-		glog.Fatalf("Failed to re-escalate to root privileges to generate attestation: %s", err.Error())
+		return fmt.Errorf("failed to re-escalate to root privileges to generate attestation: %w", err)
 	}
 
 	if rwc, err := tpm2.OpenTPM("/dev/tpmrm0"); err == nil {
@@ -389,7 +389,7 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 	}
 
 	if err := tryDeescalatePrivileges(); err != nil {
-		glog.Fatalf("Failed to de-escalate to user privileges: %s", err.Error())
+		return fmt.Errorf("failed to de-escalate to user privileges: %w", err)
 	}
 
 	// Marshal evidence.
