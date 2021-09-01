@@ -20,7 +20,10 @@ package(default_visibility = ["//visibility:private"])
 
 go_library(
     name = "server",
-    srcs = ["server.go"],
+    srcs = [
+        "httpproxy.go",
+        "server.go",
+    ],
     importpath = "github.com/GoogleCloudPlatform/stet/server",
     visibility = ["//:__subpackages__"],
     deps = [
@@ -31,6 +34,8 @@ go_library(
         "//transportshim",
         "@com_github_golang_glog//:glog",
         "@com_github_google_uuid//:uuid",
+        "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_protobuf//encoding/protojson",
         "@org_golang_google_protobuf//proto",
     ],
 )
@@ -38,7 +43,11 @@ go_library(
 go_test(
     name = "server_test",
     size = "small",
-    srcs = ["server_test.go"],
+    srcs = [
+        "server_test.go",
+    ],
     embed = [":server"],
-    deps = ["//proto:secure_session_go_proto"],
+    deps = [
+        "//proto:secure_session_go_proto",
+    ],
 )
