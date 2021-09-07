@@ -9,7 +9,7 @@ production use.
 
 ## Building STET
 
-STET can be built manually using _either_ Go's native toolchain (e.g. `go get`
+STET can be built manually using *either* Go's native toolchain (e.g. `go get`
 and `go build` commands), or via [Bazel](https://bazel.build/).
 
 ### Using Go's Native Toolchain

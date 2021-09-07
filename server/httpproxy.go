@@ -16,11 +16,9 @@ package server
 
 import (
 	"context"
-	"crypto/x509"
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"net/http/httptest"
 	"regexp"
 
 	cwgrpc "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
@@ -60,21 +58,20 @@ func (ekmToken) RequireTransportSecurity() bool {
 
 // SecureSessionHTTPService is an HTTP-to-gRPC proxy for SecureSessionService, to be used for local testing only.
 type SecureSessionHTTPService struct {
-	grpcService   *SecureSessionService
 	sessionClient ssgrpc.ConfidentialEkmSessionEstablishmentServiceClient
 	wrapClient    cwgrpc.ConfidentialWrapUnwrapServiceClient
-	httpServer    *httptest.Server
-	url           string
-
-	// Fake service clients for unit tests.
-	fakeSessionClient ssgrpc.ConfidentialEkmSessionEstablishmentServiceClient
-	fakeWrapClient    cwgrpc.ConfidentialWrapUnwrapServiceClient
 }
 
 // NewSecureSessionHTTPService creates and returns an instance of SecureSessionHTTPService.
 // The Caller should Close using SecureSessionHTTPService.Close() when finished.
 func NewSecureSessionHTTPService(address, authToken string) (*SecureSessionHTTPService, error) {
-	return NewSecureSessionHTTPServiceWithFakeClients(address, authToken, nil, nil)
+	srv := &SecureSessionHTTPService{}
+
+	if err := srv.connectToGRPCServer(address, authToken); err != nil {
+		return nil, fmt.Errorf("error initializing test server: %w", err)
+	}
+
+	return srv, nil
 }
 
 // NewSecureSessionHTTPServiceWithFakeClients creates and returns an instance of SecureSessionHTTPService
@@ -86,12 +83,8 @@ func NewSecureSessionHTTPServiceWithFakeClients(address, authToken string, sessi
 	}
 
 	srv := &SecureSessionHTTPService{
-		fakeSessionClient: sessionClient,
-		fakeWrapClient:    wrapClient,
-	}
-
-	if err := srv.connectToGRPCServer(address, authToken); err != nil {
-		return nil, fmt.Errorf("error initializing test server: %w", err)
+		sessionClient: sessionClient,
+		wrapClient:    wrapClient,
 	}
 
 	return srv, nil
@@ -260,7 +253,8 @@ func (s *SecureSessionHTTPService) handleConfidentialUnwrap(w http.ResponseWrite
 	w.Write(marshaled)
 }
 
-func (s *SecureSessionHTTPService) handlerfunc(w http.ResponseWriter, r *http.Request) {
+// Handler acts as a HandlerFunc for HTTP servers.
+func (s *SecureSessionHTTPService) Handler(w http.ResponseWriter, r *http.Request) {
 	switch endpoint := r.URL.String(); endpoint {
 	case beginSessionEndpoint:
 		s.handleBeginSession(w, r)
@@ -285,7 +279,7 @@ func (s *SecureSessionHTTPService) handlerfunc(w http.ResponseWriter, r *http.Re
 			s.handleConfidentialWrap(w, r)
 			return
 		}
-
+		// Attempt to match to ConfidentialUnwrap
 		match, err = regexp.MatchString(confidentialUnwrapEndpoint, endpoint)
 		if err != nil {
 			w.WriteHeader(http.StatusInternalServerError)
@@ -301,41 +295,20 @@ func (s *SecureSessionHTTPService) handlerfunc(w http.ResponseWriter, r *http.Re
 
 // Initializes gRPC clients and connects to services at given address. Creates and returns httptest server.
 func (s *SecureSessionHTTPService) connectToGRPCServer(address, authToken string) error {
-	if s.fakeSessionClient != nil && s.fakeWrapClient != nil {
-		s.sessionClient = s.fakeSessionClient
-		s.wrapClient = s.fakeWrapClient
-	} else {
-		grpcOpts := []grpc.DialOption{grpc.WithInsecure()}
+	grpcOpts := []grpc.DialOption{grpc.WithInsecure()}
 
-		// Add bearer token to requests if present.
-		if authToken != "" {
-			grpcOpts = append(grpcOpts, grpc.WithPerRPCCredentials(ekmToken{token: authToken}))
-		}
-
-		conn, err := grpc.Dial(address, grpcOpts...)
-		if err != nil {
-			return fmt.Errorf("error creating gRPC client connection: %w", err)
-		}
-
-		s.sessionClient = ssgrpc.NewConfidentialEkmSessionEstablishmentServiceClient(conn)
-		s.wrapClient = cwgrpc.NewConfidentialWrapUnwrapServiceClient(conn)
+	// Add bearer token to requests if present.
+	if authToken != "" {
+		grpcOpts = append(grpcOpts, grpc.WithPerRPCCredentials(ekmToken{token: authToken}))
 	}
-	s.httpServer = httptest.NewTLSServer(http.HandlerFunc(s.handlerfunc))
+
+	conn, err := grpc.Dial(address, grpcOpts...)
+	if err != nil {
+		return fmt.Errorf("error creating gRPC client connection: %w", err)
+	}
+
+	s.sessionClient = ssgrpc.NewConfidentialEkmSessionEstablishmentServiceClient(conn)
+	s.wrapClient = cwgrpc.NewConfidentialWrapUnwrapServiceClient(conn)
 
 	return nil
-}
-
-// Cert returns the certificate of the httptest server.
-func (s *SecureSessionHTTPService) Cert() *x509.Certificate {
-	return s.httpServer.Certificate()
-}
-
-// URL returns the URL of the httptest server.
-func (s *SecureSessionHTTPService) URL() string {
-	return s.httpServer.URL
-}
-
-// Close closes the httptest server.
-func (s *SecureSessionHTTPService) Close() {
-	s.httpServer.Close()
 }
