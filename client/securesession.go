@@ -329,13 +329,6 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 		SessionContext: c.ctx,
 	}
 
-	// Get exported keying material from TLS session.
-	tlsState := c.tls.ConnectionState()
-	material, err := tlsState.ExportKeyingMaterial(constants.ExportLabel, nil, 16)
-	if err != nil {
-		return fmt.Errorf("error exporting key material: %v", err)
-	}
-
 	evidence := aepb.AttestationEvidence{
 		Attestation: &atpb.Attestation{},
 	}
@@ -345,6 +338,7 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 		return fmt.Errorf("failed to re-escalate to root privileges to generate attestation: %w", err)
 	}
 
+	// If the TPM device is present, generate an attestation.
 	if rwc, err := tpm2.OpenTPM("/dev/tpmrm0"); err == nil {
 		ek, err := tpmclient.GceAttestationKeyRSA(rwc)
 		if err != nil {
@@ -352,12 +346,28 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 		}
 		defer ek.Close()
 
-		att, err := ek.Attest(material, nil)
+		// Generate exported keying material and attestation.
+		tlsState := c.tls.ConnectionState()
+		material, err := tlsState.ExportKeyingMaterial(constants.ExportLabel, nil, 16)
+		if err != nil {
+			return fmt.Errorf("error exporting key material: %v", err)
+		}
+
+		nonce := []byte(constants.AttestationPrefix)
+		nonce = append(nonce, material...)
+		att, err := ek.Attest(nonce, nil)
 
 		if err != nil {
 			return fmt.Errorf("error generating attestation: %v", err)
 		}
 
+		glog.Infof("Obtained attestation from the vTPM")
+
+		if err := tryDeescalatePrivileges(); err != nil {
+			return fmt.Errorf("failed to de-escalate to user privileges: %w", err)
+		}
+
+		// Add GCE instance info to the attestation proto.
 		projectID, err := metadata.ProjectID()
 		// If unable to retrieve the Project ID, set to empty string.
 		if err != nil {
@@ -382,34 +392,24 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 			InstanceName: instanceName,
 		}
 
-		glog.Infof("Obtained the attestation from vTPM")
 		evidence = aepb.AttestationEvidence{
 			Attestation: att,
 		}
+
+		// Session-encrypt the attestation evidence proto.
+		marshaledEvidence, err := proto.Marshal(&evidence)
+		if err != nil {
+			return fmt.Errorf("error marshalling evidence to a proto: %v", err)
+		}
+
+		// Pass the buffer through TLS.
+		if _, err := c.tls.Write(marshaledEvidence); err != nil {
+			return fmt.Errorf("error writing records to TLS: %v", err)
+		}
+
+		// Wait for TLS session to process, then add session-protected records to request.
+		req.AttestationEvidenceRecords = c.shim.DrainSendBuf()
 	}
-
-	if err := tryDeescalatePrivileges(); err != nil {
-		return fmt.Errorf("failed to de-escalate to user privileges: %w", err)
-	}
-
-	// Marshal evidence.
-	marshaledEvidence, err := proto.Marshal(&evidence)
-	if err != nil {
-		return fmt.Errorf("error marshalling evidence to a proto: %v", err)
-	}
-
-	// Concatenate parts together to send over TLS session.
-	records := []byte(constants.AttestationPrefix)
-	records = append(records, material...)
-	records = append(records, marshaledEvidence...)
-
-	// Pass the buffer through TLS.
-	if _, err := c.tls.Write(records); err != nil {
-		return fmt.Errorf("error writing records to TLS: %v", err)
-	}
-
-	// Wait for TLS session to process, then add session-protected records to request.
-	req.AttestationEvidenceRecords = c.shim.DrainSendBuf()
 
 	if _, err := c.client.Finalize(ctx, req); err != nil {
 		return fmt.Errorf("error finalizing secure session with client: %v", err)

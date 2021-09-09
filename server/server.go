@@ -258,54 +258,57 @@ func (s *SecureSessionService) Finalize(ctx context.Context, req *sspb.FinalizeR
 		return nil, fmt.Errorf("session with id: %v in unexpected state: %d. Expecting: %d", connID, ch.state, ServerStateAttestationNegotiated)
 	}
 
-	ch.shim.QueueReceiveBuf(req.AttestationEvidenceRecords)
-	buf := make([]byte, len(req.AttestationEvidenceRecords))
-
-	offset := 0
-	priorChunkLen := 0
-
-	/*
-	 * Approach: for a large attestation (e.g., 11K TLS read returns the attestation
-	 * in chunks.  The attestation size in total is smaller than the length
-	 * of the req.AttestationEvidenceRecords buffer after its decrypted via
-	 * ch.conn.Read. If ch.conn.Read is called beyond the total size of the
-	 * decrypted attestion it will block and hang the connection.  Given that we
-	 * do not know the attestation's exact size, the current strategy is to keep
-	 * reading while the decrypted chunks returned by the ch.conn.Read are getting
-	 * larger.  Once a decrease in size is detected, it is treated as the last chunk.
-	 */
-
-	for {
-		chunkLen, err := ch.conn.Read(buf[offset:])
-
-		if err != nil {
-			ch.state = ServerStateFailed
-			return nil, fmt.Errorf("failed to read client's AttestationEvidenceRecords message from TLS connection : %v", err)
-		}
-
-		offset += chunkLen
-
-		// The multi-chunk approach described above only applies to large attestations (e.g., 11K).
-		if priorChunkLen == 0 && chunkLen <= minUnchunkedAttestationSize {
-			break
-		}
-
-		if chunkLen <= priorChunkLen {
-			break
-		} else {
-			priorChunkLen = chunkLen
-		}
-	}
-
+	// Unmarshal attestation evidence if included in request.
 	var clientAttEvidence attpb.AttestationEvidence
 
-	// 16 bytes to account for session key that gets appended.
-	AttestationPayloadOffset := len([]byte(constants.AttestationPrefix)) + 16
+	if len(req.GetAttestationEvidenceRecords()) > 0 {
+		ch.shim.QueueReceiveBuf(req.AttestationEvidenceRecords)
+		buf := make([]byte, len(req.AttestationEvidenceRecords))
 
-	err := proto.Unmarshal(buf[AttestationPayloadOffset:offset], &clientAttEvidence)
-	if err != nil {
-		ch.state = ServerStateFailed
-		return nil, fmt.Errorf("failed to unmarshal AttestationEvidence: %w", err)
+		offset := 0
+		priorChunkLen := 0
+
+		/*
+		 * Approach: for a large attestation (e.g., 11K TLS read returns the attestation
+		 * in chunks.  The attestation size in total is smaller than the length
+		 * of the req.AttestationEvidenceRecords buffer after its decrypted via
+		 * ch.conn.Read. If ch.conn.Read is called beyond the total size of the
+		 * decrypted attestion it will block and hang the connection.  Given that we
+		 * do not know the attestation's exact size, the current strategy is to keep
+		 * reading while the decrypted chunks returned by the ch.conn.Read are getting
+		 * larger.  Once a decrease in size is detected, it is treated as the last chunk.
+		 */
+
+		for {
+			chunkLen, err := ch.conn.Read(buf[offset:])
+
+			if err != nil {
+				ch.state = ServerStateFailed
+				return nil, fmt.Errorf("failed to read client's AttestationEvidenceRecords message from TLS connection : %v", err)
+			}
+
+			offset += chunkLen
+
+			// The multi-chunk approach described above only applies to large attestations (e.g., 11K).
+			if priorChunkLen == 0 && chunkLen <= minUnchunkedAttestationSize {
+				break
+			}
+
+			if chunkLen <= priorChunkLen {
+				break
+			} else {
+				priorChunkLen = chunkLen
+			}
+		}
+
+		// 16 bytes to account for session key that gets appended.
+		AttestationPayloadOffset := len([]byte(constants.AttestationPrefix)) + 16
+
+		err := proto.Unmarshal(buf[AttestationPayloadOffset:offset], &clientAttEvidence)
+		if err != nil {
+			ch.state = ServerStateFailed
+			return nil, fmt.Errorf("failed to unmarshal AttestationEvidence: %w", err)
+		}
 	}
 
 	rep := &sspb.FinalizeResponse{}
