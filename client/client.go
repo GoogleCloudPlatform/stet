@@ -263,42 +263,46 @@ type kekMetadata struct {
 func protectionLevelsAndUris(ctx context.Context, kmsClient cloudKMSClient, kekInfos []*configpb.KekInfo) ([]kekMetadata, error) {
 	var kekMetadatas []kekMetadata
 	for _, kekInfo := range kekInfos {
-		uri := kekInfo.GetKekUri()
-		// Verify that the URI indicates a GCP KMS key.
-		if !strings.HasPrefix(uri, gcpKeyPrefix) {
-			return nil, fmt.Errorf("%v does not have the expected URI prefix, want %v", uri, gcpKeyPrefix)
-		}
+		kmd := kekMetadata{}
 
-		cryptoKey, err := kmsClient.GetCryptoKey(ctx, &spb.GetCryptoKeyRequest{Name: strings.TrimPrefix(uri, gcpKeyPrefix)})
-		if err != nil {
-			return nil, fmt.Errorf("error retrieving key metadata: %v", err)
-		}
-
-		cryptoKeyVer := cryptoKey.GetPrimary()
-		if cryptoKeyVer.GetState() != rpb.CryptoKeyVersion_ENABLED {
-			return nil, fmt.Errorf("CryptoKeyVersion for %v is not enabled", uri)
-		}
-
-		if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED {
-			return nil, fmt.Errorf("unspecified protection level %v", cryptoKeyVer.GetProtectionLevel())
-		}
-
-		kmd := kekMetadata{
-			protectionLevel: cryptoKeyVer.GetProtectionLevel(),
-		}
-
-		if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_EXTERNAL {
-			if cryptoKeyVer.ExternalProtectionLevelOptions == nil {
-				return nil, fmt.Errorf("CryptoKeyVersion for KEK %s does not have external protection level options despite being EXTERNAL protection level", uri)
+		// Cloud KMS only needs to be queried if a KEK URI is specified (eg. not an RSA fingerprint).
+		switch kekInfo.GetKekType().(type) {
+		case *configpb.KekInfo_KekUri:
+			uri := kekInfo.GetKekUri()
+			// Verify that the URI indicates a GCP KMS key.
+			if !strings.HasPrefix(uri, gcpKeyPrefix) {
+				return nil, fmt.Errorf("%v does not have the expected URI prefix, want %v", uri, gcpKeyPrefix)
 			}
 
-			// Use external URI to unwrap with.
-			kmd.uri = cryptoKeyVer.GetExternalProtectionLevelOptions().GetExternalKeyUri()
-		} else {
-			kmd.uri = uri
-		}
+			cryptoKey, err := kmsClient.GetCryptoKey(ctx, &spb.GetCryptoKeyRequest{Name: strings.TrimPrefix(uri, gcpKeyPrefix)})
+			if err != nil {
+				return nil, fmt.Errorf("error retrieving key metadata: %v", err)
+			}
 
-		kmd.resourceName = strings.TrimPrefix(uri, gcpKeyPrefix)
+			cryptoKeyVer := cryptoKey.GetPrimary()
+			if cryptoKeyVer.GetState() != rpb.CryptoKeyVersion_ENABLED {
+				return nil, fmt.Errorf("CryptoKeyVersion for %v is not enabled", uri)
+			}
+
+			if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED {
+				return nil, fmt.Errorf("unspecified protection level %v", cryptoKeyVer.GetProtectionLevel())
+			}
+
+			kmd.protectionLevel = cryptoKeyVer.GetProtectionLevel()
+
+			if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_EXTERNAL {
+				if cryptoKeyVer.ExternalProtectionLevelOptions == nil {
+					return nil, fmt.Errorf("CryptoKeyVersion for KEK %s does not have external protection level options despite being EXTERNAL protection level", uri)
+				}
+
+				// Use external URI to unwrap with.
+				kmd.uri = cryptoKeyVer.GetExternalProtectionLevelOptions().GetExternalKeyUri()
+			} else {
+				kmd.uri = uri
+			}
+
+			kmd.resourceName = strings.TrimPrefix(uri, gcpKeyPrefix)
+		}
 
 		kekMetadatas = append(kekMetadatas, kmd)
 	}

@@ -236,11 +236,18 @@ func TestProtectionLevelsAndUris(t *testing.T) {
 				KekUri: testKEKURI + "3",
 			},
 		},
+		// This struct should be ignored by protectionLevelsAndUris(), resulting
+		// in an empty kekMetadata in the return value.
+		&configpb.KekInfo{
+			KekType: &configpb.KekInfo_RsaFingerprint{
+				RsaFingerprint: testPublicFingerprint,
+			},
+		},
 	}
 
-	expectedURIs := []string{testKEKURI + "1", testKEKURI + "2", testKEKURIExternal}
+	expectedURIs := []string{testKEKURI + "1", testKEKURI + "2", testKEKURIExternal, ""}
 
-	protectionLevels := []kmsrpb.ProtectionLevel{kmsrpb.ProtectionLevel_HSM, kmsrpb.ProtectionLevel_SOFTWARE, kmsrpb.ProtectionLevel_EXTERNAL}
+	protectionLevels := []kmsrpb.ProtectionLevel{kmsrpb.ProtectionLevel_HSM, kmsrpb.ProtectionLevel_SOFTWARE, kmsrpb.ProtectionLevel_EXTERNAL, kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED}
 	plIndex := 0
 	fakeKmsClient := &fakeKeyManagementClient{
 		getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
