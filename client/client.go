@@ -53,6 +53,12 @@ type DecryptedData struct {
 	BlobID    string
 }
 
+// unwrappedShare represents an unwrapped share and its associated external URI.
+type unwrappedShare struct {
+	share []byte
+	uri   string
+}
+
 type cloudKMSClient interface {
 	GetCryptoKey(context.Context, *spb.GetCryptoKeyRequest, ...gax.CallOption) (*rpb.CryptoKey, error)
 	Encrypt(context.Context, *spb.EncryptRequest, ...gax.CallOption) (*spb.EncryptResponse, error)
@@ -469,7 +475,7 @@ func privateKeyForRSAFingerprint(kek *configpb.KekInfo, keys *configpb.Asymmetri
 }
 
 // unwrapAndValidateShares decrypts the given wrapped share based on its URI.
-func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares []*configpb.WrappedShare, kekInfos []*configpb.KekInfo, keys *configpb.AsymmetricKeys) ([][]byte, error) {
+func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares []*configpb.WrappedShare, kekInfos []*configpb.KekInfo, keys *configpb.AsymmetricKeys) ([]unwrappedShare, error) {
 	if len(wrappedShares) != len(kekInfos) {
 		return nil, fmt.Errorf("number of shares to unwrap (%d) does not match number of KEKs (%d)", len(wrappedShares), len(kekInfos))
 	}
@@ -477,9 +483,9 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 	// Gets populated once the first non-local key is seen.
 	var kekMetadatas []kekMetadata
 
-	var unwrappedShares [][]byte
+	var unwrappedShares []unwrappedShare
 	for i, wrapped := range wrappedShares {
-		var unwrapped []byte
+		unwrapped := unwrappedShare{}
 		kek := kekInfos[i]
 
 		switch x := kek.KekType.(type) {
@@ -489,7 +495,7 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 				return nil, fmt.Errorf("failed to find public key for RSA fingerprint: %w", err)
 			}
 
-			unwrapped, err = rsa.DecryptOAEP(sha256.New(), rand.Reader, key, wrapped.GetShare(), nil)
+			unwrapped.share, err = rsa.DecryptOAEP(sha256.New(), rand.Reader, key, wrapped.GetShare(), nil)
 			if err != nil {
 				return nil, fmt.Errorf("error unwrapping key share: %v", err)
 			}
@@ -513,23 +519,28 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 			var err error
 			switch pl := kekMetadatas[i].protectionLevel; pl {
 			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
-				unwrapped, err = unwrapKMSShare(ctx, c.kmsClient, wrapped.GetShare(), kekMetadatas[i].resourceName)
+				unwrapped.share, err = unwrapKMSShare(ctx, c.kmsClient, wrapped.GetShare(), kekMetadatas[i].resourceName)
 				if err != nil {
 					return nil, fmt.Errorf("error unwrapping key share: %v", err)
 				}
 			case rpb.ProtectionLevel_EXTERNAL:
-				unwrapped, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), kekMetadatas[i])
+				unwrapped.share, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), kekMetadatas[i])
 				if err != nil {
 					return nil, fmt.Errorf("error unwrapping with external EKM for %v: %v", kekMetadatas[i].uri, err)
 				}
 			default:
 				return nil, fmt.Errorf("unsupported protection level %v", pl)
 			}
+
+			// Return the URI used: the Cloud KMS one in the case of a software
+			// or HSM key, and the external key URI for an external key.
+			unwrapped.uri = kekMetadatas[i].uri
+
 		default:
 			return nil, fmt.Errorf("unsupported KekInfo type: %v", x)
 		}
 
-		if !ValidateShare(unwrapped, wrapped.GetHash()) {
+		if !ValidateShare(unwrapped.share, wrapped.GetHash()) {
 			return nil, fmt.Errorf("unwrapped share %v does not have the expected hash", i)
 		}
 
@@ -647,12 +658,18 @@ func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, 
 			return nil, fmt.Errorf("number of unwrapped shares is %v but expected 1 for 'no split' option", len(unwrappedShares))
 		}
 
-		combinedShares = unwrappedShares[0]
+		combinedShares = unwrappedShares[0].share
 
 	// Reverse Shamir's Secret Sharing to reconstitute the whole DEK.
 	case *configpb.KeyConfig_Shamir:
+		var shares [][]byte
+
+		for _, share := range unwrappedShares {
+			shares = append(shares, share.share)
+		}
+
 		var err error
-		combinedShares, err = CombineShares(unwrappedShares)
+		combinedShares, err = CombineShares(shares)
 		if err != nil {
 			return nil, fmt.Errorf("Error combining DEK shares: %v", err)
 		}
@@ -683,10 +700,10 @@ func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, 
 	// Extract key URIs from KeyConfigs.
 	var keyURIs []string
 	for _, kcfg := range config.GetKeyConfigs() {
-		for _, uri := range kcfg.GetKekInfos() {
+		for i, uri := range kcfg.GetKekInfos() {
 			switch uri.GetKekType().(type) {
 			case *configpb.KekInfo_KekUri:
-				keyURIs = append(keyURIs, uri.GetKekUri())
+				keyURIs = append(keyURIs, unwrappedShares[i].uri)
 			}
 		}
 	}

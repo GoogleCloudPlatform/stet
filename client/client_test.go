@@ -37,6 +37,7 @@ const (
 	testKEKURI          = "gcp-kms://projects/test/locations/test/keyRings/test/cryptoKeys/test"
 	testKEKName         = "projects/test/locations/test/keyRings/test/cryptoKeys/test"
 	testKEKURIExternal  = "gcp-kms://projects/test/locations/test/keyRings/test/cryptoKeys/testExternal"
+	testExternalKEKURI  = "https://my-kms.io/external-key"
 	testExternalKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/testExternal"
 	testKEKURIHSM       = "gcp-kms://projects/test/locations/test/keyRings/test/cryptoKeys/testHsm"
 	testHSMKEKName      = "projects/test/locations/test/keyRings/test/cryptoKeys/testHsm"
@@ -55,7 +56,7 @@ func createEnabledCryptoKey(protectionLevel kmsrpb.ProtectionLevel) *kmsrpb.Cryp
 
 	if protectionLevel == kmsrpb.ProtectionLevel_EXTERNAL {
 		ck.Primary.ExternalProtectionLevelOptions = &kmsrpb.ExternalProtectionLevelOptions{
-			ExternalKeyUri: testKEKURIExternal,
+			ExternalKeyUri: testExternalKEKURI,
 		}
 	}
 
@@ -245,7 +246,7 @@ func TestProtectionLevelsAndUris(t *testing.T) {
 		},
 	}
 
-	expectedURIs := []string{testKEKURI + "1", testKEKURI + "2", testKEKURIExternal, ""}
+	expectedURIs := []string{testKEKURI + "1", testKEKURI + "2", testExternalKEKURI, ""}
 
 	protectionLevels := []kmsrpb.ProtectionLevel{kmsrpb.ProtectionLevel_HSM, kmsrpb.ProtectionLevel_SOFTWARE, kmsrpb.ProtectionLevel_EXTERNAL, kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED}
 	plIndex := 0
@@ -691,7 +692,7 @@ func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 		t.Fatalf("unwrapAndValidateShares(ctx, %s, %v, %v) did not return the expected number of shares. Got %v, want 1", wrappedShares, ki, keys, len(unwrappedShares))
 	}
 
-	if !bytes.Equal(unwrappedShares[0], testShare) {
+	if !bytes.Equal(unwrappedShares[0].share, testShare) {
 		t.Errorf("unwrapAndValidateShares(ctx, %s, %v, %v) did not return the expected unwrapped share. Got %v, want %v", testShare, ki, keys, unwrappedShares[0], testShare)
 	}
 }
@@ -1039,7 +1040,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 				t.Fatalf("unwrapAndValidateShares did not return the expected number of shares. Got %v, want %v", len(unwrappedShares), len(testCase.wrappedShare))
 			}
 
-			if !bytes.Equal(unwrappedShares[0], expectedUnwrappedShare) {
+			if !bytes.Equal(unwrappedShares[0].share, expectedUnwrappedShare) {
 				t.Errorf("unwrapAndValidateShares did not return the expected unwrapped share. Got %v, want %v", unwrappedShares[0], testCase.wrappedShare)
 			}
 		})
@@ -1101,7 +1102,7 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 	}
 
 	for i, unwrappedShare := range unwrapped {
-		if !bytes.Equal(unwrappedShare, sharesList[i]) {
+		if !bytes.Equal(unwrappedShare.share, sharesList[i]) {
 			t.Errorf("unwrapAndValidateShares(context.Background(), %v, %v) did not return the expected wrapped share %v. Got %v, want %v", sharesList, kekInfoList, i, unwrappedShare, sharesList[i])
 		}
 	}
@@ -1253,7 +1254,7 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 	}
 
 	for i, unwrappedShare := range unwrapped {
-		if !bytes.Equal(unwrappedShare, sharesList[i]) {
+		if !bytes.Equal(unwrappedShare.share, sharesList[i]) {
 			t.Errorf("unwrapAndValidateShares(context.Background(), %v, %v, {}) = %v, want %v", sharesList, kekInfoList, unwrappedShare, sharesList[i])
 		}
 	}
