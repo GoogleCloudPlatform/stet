@@ -32,8 +32,13 @@ import (
 	"sigs.k8s.io/yaml"
 )
 
-// The default name for the STET configuration file.
-const defaultConfigName string = "stet.yaml"
+const (
+	// The default name for the STET configuration file.
+	defaultConfigName string = "stet.yaml"
+
+	// The current version, displayed via the `version` subcommand.
+	stetVersion string = "0.0.0"
+)
 
 // encryptCmd handles CLI options for the encryption command.
 type encryptCmd struct {
@@ -338,6 +343,18 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 	return subcommands.ExitSuccess
 }
 
+// versionCmd handles CLI options for the version command.
+type versionCmd struct{}
+
+func (*versionCmd) Name() string           { return "version" }
+func (*versionCmd) Synopsis() string       { return "prints the current version" }
+func (*versionCmd) Usage() string          { return "Usage: stet version" }
+func (*versionCmd) SetFlags(*flag.FlagSet) {}
+func (*versionCmd) Execute(context.Context, *flag.FlagSet, ...interface{}) subcommands.ExitStatus {
+	fmt.Printf("STET Version %s\n", stetVersion)
+	return subcommands.ExitSuccess
+}
+
 func main() {
 	// If effective UID is 0 and real UID != 0, we invoked as user but need to descalate.
 	euid := syscall.Geteuid()
@@ -356,6 +373,7 @@ func main() {
 	subcommands.Register(subcommands.HelpCommand(), "")
 	subcommands.Register(&encryptCmd{}, "")
 	subcommands.Register(&decryptCmd{}, "")
+	subcommands.Register(&versionCmd{}, "")
 
 	ctx := context.Background()
 	os.Exit(int(subcommands.Execute(ctx)))
