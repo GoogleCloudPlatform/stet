@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net/http"
-	"regexp"
+	"strings"
 
 	cwgrpc "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
 	cwpb "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
@@ -31,13 +31,13 @@ import (
 )
 
 const (
-	beginSessionEndpoint         = "/v0/session/begin-session"
-	handshakeEndpoint            = "/v0/session/handshake"
-	negotiateAttestationEndpoint = "/v0/session/negotiate-attestations"
-	finalizeEndpoint             = "/v0/session/finalize"
-	endSessionEndpoint           = "/v0/session/end-session"
-	confidentialWrapEndpoint     = "/v0/.*:confidential-wrap"
-	confidentialUnwrapEndpoint   = "/v0/.*:confidential-unwrap"
+	beginSessionEndpoint         = "/session/beginsession"
+	handshakeEndpoint            = "/session/handshake"
+	negotiateAttestationEndpoint = "/session/negotiateattestation"
+	finalizeEndpoint             = "/session/finalize"
+	endSessionEndpoint           = "/session/endsession"
+	confidentialWrapEndpoint     = ":confidentialwrap"
+	confidentialUnwrapEndpoint   = ":confidentialunwrap"
 )
 
 // ekmToken is a struct that implements credentials.PerRPCCredentials to
@@ -255,39 +255,23 @@ func (s *SecureSessionHTTPService) handleConfidentialUnwrap(w http.ResponseWrite
 
 // Handler acts as a HandlerFunc for HTTP servers.
 func (s *SecureSessionHTTPService) Handler(w http.ResponseWriter, r *http.Request) {
-	switch endpoint := r.URL.String(); endpoint {
-	case beginSessionEndpoint:
+	endpoint := r.URL.String()
+
+	if strings.HasSuffix(endpoint, beginSessionEndpoint) {
 		s.handleBeginSession(w, r)
-
-	case handshakeEndpoint:
+	} else if strings.HasSuffix(endpoint, handshakeEndpoint) {
 		s.handleHandshake(w, r)
-
-	case negotiateAttestationEndpoint:
+	} else if strings.HasSuffix(endpoint, negotiateAttestationEndpoint) {
 		s.handleNegotiateAttestation(w, r)
-
-	case finalizeEndpoint:
+	} else if strings.HasSuffix(endpoint, finalizeEndpoint) {
 		s.handleFinalize(w, r)
-
-	case endSessionEndpoint:
+	} else if strings.HasSuffix(endpoint, endSessionEndpoint) {
 		s.handleEndSession(w, r)
-
-	default:
-		match, err := regexp.MatchString(confidentialWrapEndpoint, endpoint)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-		} else if match {
-			s.handleConfidentialWrap(w, r)
-			return
-		}
-		// Attempt to match to ConfidentialUnwrap
-		match, err = regexp.MatchString(confidentialUnwrapEndpoint, endpoint)
-		if err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-		} else if match {
-			s.handleConfidentialUnwrap(w, r)
-			return
-		}
-
+	} else if strings.HasSuffix(endpoint, confidentialWrapEndpoint) {
+		s.handleConfidentialWrap(w, r)
+	} else if strings.HasSuffix(endpoint, confidentialUnwrapEndpoint) {
+		s.handleConfidentialUnwrap(w, r)
+	} else {
 		// If no match found, respond with error.
 		w.WriteHeader(http.StatusBadRequest)
 	}

@@ -17,7 +17,6 @@ package client
 import (
 	"context"
 	"crypto/x509"
-	"fmt"
 	"io/ioutil"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +29,10 @@ import (
 
 	"testing"
 )
+
+// Placeholder to be appended to server URLs when the client is expected to
+// remove two path components.
+const placeholderEndpoint = "/endpoint/this-is-key-uri"
 
 func TestPost(t *testing.T) {
 	authToken := "I am a token."
@@ -75,7 +78,7 @@ func TestPost(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AddCert(ts.Certificate())
 
-	client := confidentialEkmClient{url: ts.URL, authToken: authToken, certPool: certPool}
+	client := confidentialEkmClient{uri: ts.URL + placeholderEndpoint, authToken: authToken, certPool: certPool}
 
 	resp := &sspb.BeginSessionResponse{}
 	if err := client.post(context.Background(), ts.URL, expectedReq, resp); err != nil {
@@ -172,10 +175,10 @@ func TestBeginSession(t *testing.T) {
 		TlsRecords:     []byte("Who's there?"),
 	}
 
-	ts, certPool := getTestServerAndCertPool(t, "/v0/session/begin-session", expectedResp)
+	ts, certPool := getTestServerAndCertPool(t, beginSessionEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &confidentialEkmClient{url: ts.URL, authToken: "", certPool: certPool}
+	client := &confidentialEkmClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
 
 	resp, err := client.BeginSession(context.Background(), &sspb.BeginSessionRequest{})
 	if err != nil {
@@ -190,10 +193,10 @@ func TestBeginSession(t *testing.T) {
 func TestHandshake(t *testing.T) {
 	expectedResp := &sspb.HandshakeResponse{TlsRecords: []byte("Goodbye, Handshake!")}
 
-	ts, certPool := getTestServerAndCertPool(t, "/v0/session/handshake", expectedResp)
+	ts, certPool := getTestServerAndCertPool(t, handshakeEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &confidentialEkmClient{url: ts.URL, authToken: "", certPool: certPool}
+	client := &confidentialEkmClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
 
 	resp, err := client.Handshake(context.Background(), &sspb.HandshakeRequest{})
 	if err != nil {
@@ -208,10 +211,10 @@ func TestHandshake(t *testing.T) {
 func TestNegotiateAttestation(t *testing.T) {
 	expectedResp := &sspb.NegotiateAttestationResponse{RequiredEvidenceTypesRecords: []byte("Goodbye, Handshake!")}
 
-	ts, certPool := getTestServerAndCertPool(t, "/v0/session/negotiate-attestations", expectedResp)
+	ts, certPool := getTestServerAndCertPool(t, negotiateAttestationEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &confidentialEkmClient{url: ts.URL, authToken: "", certPool: certPool}
+	client := &confidentialEkmClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
 
 	resp, err := client.NegotiateAttestation(context.Background(), &sspb.NegotiateAttestationRequest{})
 	if err != nil {
@@ -226,10 +229,10 @@ func TestNegotiateAttestation(t *testing.T) {
 func TestFinalize(t *testing.T) {
 	expectedResp := &sspb.FinalizeResponse{}
 
-	ts, certPool := getTestServerAndCertPool(t, "/v0/session/finalize", expectedResp)
+	ts, certPool := getTestServerAndCertPool(t, finalizeEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &confidentialEkmClient{url: ts.URL, authToken: "", certPool: certPool}
+	client := &confidentialEkmClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
 
 	resp, err := client.Finalize(context.Background(), &sspb.FinalizeRequest{})
 	if err != nil {
@@ -244,10 +247,10 @@ func TestFinalize(t *testing.T) {
 func TestEndSession(t *testing.T) {
 	expectedResp := &sspb.EndSessionResponse{}
 
-	ts, certPool := getTestServerAndCertPool(t, "/v0/session/end-session", expectedResp)
+	ts, certPool := getTestServerAndCertPool(t, endSessionEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &confidentialEkmClient{url: ts.URL, authToken: "", certPool: certPool}
+	client := &confidentialEkmClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
 
 	resp, err := client.EndSession(context.Background(), &sspb.EndSessionRequest{})
 	if err != nil {
@@ -265,10 +268,10 @@ func TestConfidentialWrap(t *testing.T) {
 		TlsRecords: []byte("Goodbye, ConfidentialWrap."),
 	}
 
-	ts, certPool := getTestServerAndCertPool(t, fmt.Sprintf("/v0/%s:confidential-wrap", keyPath), expectedResp)
+	ts, certPool := getTestServerAndCertPool(t, "/endpoint/"+keyPath+confidentialWrapEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &confidentialEkmClient{url: ts.URL, authToken: "", certPool: certPool}
+	client := &confidentialEkmClient{uri: ts.URL + "/endpoint/" + keyPath, authToken: "", certPool: certPool}
 
 	resp, err := client.ConfidentialWrap(context.Background(),
 		&cwpb.ConfidentialWrapRequest{RequestMetadata: &cwpb.RequestMetadata{KeyPath: keyPath}})
@@ -288,10 +291,10 @@ func TestConfidentialUnwrap(t *testing.T) {
 		TlsRecords: []byte("Goodbye, ConfidentialUnwrap."),
 	}
 
-	ts, certPool := getTestServerAndCertPool(t, fmt.Sprintf("/v0/%s:confidential-unwrap", keyPath), expectedResp)
+	ts, certPool := getTestServerAndCertPool(t, "/endpoint/"+keyPath+confidentialUnwrapEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &confidentialEkmClient{url: ts.URL, authToken: "", certPool: certPool}
+	client := &confidentialEkmClient{uri: ts.URL + "/endpoint/" + keyPath, authToken: "", certPool: certPool}
 
 	resp, err := client.ConfidentialUnwrap(context.Background(),
 		&cwpb.ConfidentialUnwrapRequest{RequestMetadata: &cwpb.RequestMetadata{KeyPath: keyPath}})
