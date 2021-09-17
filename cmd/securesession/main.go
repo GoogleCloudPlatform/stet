@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	addr         = flag.String("addr", fmt.Sprintf("localhost:%d", constants.SrvPort), "Service address of server")
+	addr         = flag.String("addr", fmt.Sprintf("localhost:%d", constants.GrpcPort), "Service address of server")
 	audience     = flag.String("audience", "", "Audience for the JWT generation")
 	authToken    = flag.String("auth_token", "", "Bearer JWT for RPC requests")
 	keyPath      = flag.String("key_path", "testPath", "The key path for wrapping/unwrapping")
