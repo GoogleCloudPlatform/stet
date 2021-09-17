@@ -143,6 +143,10 @@ func (s *SecureSessionService) BeginSession(ctx context.Context, req *sspb.Begin
 		}
 	}()
 
+	if len(req.TlsRecords) == 0 {
+		return nil, fmt.Errorf("TLS records were empty")
+	}
+
 	ch.shim.QueueReceiveBuf(req.TlsRecords)
 
 	rep := &sspb.BeginSessionResponse{
@@ -169,6 +173,10 @@ func (s *SecureSessionService) Handshake(ctx context.Context, req *sspb.Handshak
 		return nil, fmt.Errorf("session with id: %v in unexpected state: %d. Expecting: %d", connID, ch.state, ServerStateInitiated)
 	}
 
+	if len(req.TlsRecords) == 0 {
+		return nil, fmt.Errorf("TLS records were empty")
+	}
+
 	ch.shim.QueueReceiveBuf(req.TlsRecords)
 
 	rep := &sspb.HandshakeResponse{
@@ -189,6 +197,10 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 
 	if ch.state != ServerStateHandshakeCompleted {
 		return nil, fmt.Errorf("session with id: %v in unexpected state: %d. Expecting: %d", connID, ch.state, ServerStateHandshakeCompleted)
+	}
+
+	if len(req.OfferedEvidenceTypesRecords) == 0 {
+		return nil, fmt.Errorf("TLS records were empty")
 	}
 
 	ch.shim.QueueReceiveBuf(req.OfferedEvidenceTypesRecords)
