@@ -18,7 +18,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"os"
 	"testing"
@@ -201,7 +200,7 @@ func (f *fakeKeyManagementClient) Close() error {
 
 func TestParseEKMKeyURI(t *testing.T) {
 	keyURI := "https://test.ekm.io/endpoints/123456"
-	expectedAddr := fmt.Sprintf("https://test.ekm.io:%v", proxyPort)
+	expectedAddr := "https://test.ekm.io"
 	expectedKeyPath := "123456"
 
 	addr, keyPath, err := parseEKMKeyURI(keyURI)

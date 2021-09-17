@@ -64,12 +64,12 @@ func removeEndpointPathComponent(url string) string {
 func (c confidentialEkmClient) post(ctx context.Context, url string, protoReq, protoResp proto.Message) error {
 	marshaled, err := protojson.Marshal(protoReq)
 	if err != nil {
-		return fmt.Errorf("Error marshaling request: %w", err)
+		return fmt.Errorf("error marshaling request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewBuffer(marshaled))
 	if err != nil {
-		return fmt.Errorf("Error creating HTTP request: %w", err)
+		return fmt.Errorf("error creating HTTP request: %w", err)
 	}
 
 	httpReq.Header.Set("Content-Type", "application/json")
@@ -90,18 +90,19 @@ func (c confidentialEkmClient) post(ctx context.Context, url string, protoReq, p
 	if err != nil {
 		return fmt.Errorf("HTTP call returned with error: %w", err)
 	}
-	if httpResp.StatusCode != http.StatusOK {
-		return fmt.Errorf("Non-OK status returned: %s", httpResp.Status)
-	}
 
 	defer httpResp.Body.Close()
 	respBody, err := ioutil.ReadAll(httpResp.Body)
 	if err != nil {
-		return fmt.Errorf("Error reading HTTP response body: %w", err)
+		return fmt.Errorf("error reading HTTP response body: %w", err)
+	}
+
+	if httpResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("non-OK status returned: %s - %s", httpResp.Status, string(respBody))
 	}
 
 	if err = protojson.Unmarshal(respBody, protoResp); err != nil {
-		return fmt.Errorf("Error unmarshaling response: %w", err)
+		return fmt.Errorf("error unmarshaling response: %w", err)
 	}
 
 	return nil

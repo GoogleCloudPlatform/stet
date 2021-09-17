@@ -31,12 +31,10 @@ import (
 
 	"github.com/GoogleCloudPlatform/stet/constants"
 	aepb "github.com/GoogleCloudPlatform/stet/proto/attestation_evidence_go_proto"
-	cwgrpc "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
 	cwpb "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
 	pb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	"github.com/GoogleCloudPlatform/stet/transportshim"
 	glog "github.com/golang/glog"
-	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -78,8 +76,7 @@ func (ekmToken) RequireTransportSecurity() bool {
 
 // SecureSessionClient is a SecureSession service client.
 type SecureSessionClient struct {
-	client           pb.ConfidentialEkmSessionEstablishmentServiceClient
-	wrapClient       cwgrpc.ConfidentialWrapUnwrapServiceClient
+	client           confidentialEkmClient
 	shim             transportshim.ShimInterface
 	tls              *tls.Conn
 	state            clientState
@@ -118,14 +115,11 @@ func tryDeescalatePrivileges() error {
 // secure session, or an error if one of the steps in the handshaking flow
 // failed.
 func EstablishSecureSession(ctx context.Context, addr, authToken string) (*SecureSessionClient, error) {
-	grpcOpts := []grpc.DialOption{grpc.WithInsecure()}
+	return establishSecureSessionWithCertPool(ctx, addr, authToken, nil)
+}
 
-	// Add bearer token to requests if present.
-	if authToken != "" {
-		grpcOpts = append(grpcOpts, grpc.WithPerRPCCredentials(ekmToken{token: authToken}))
-	}
-
-	client, err := newSecureSessionClient(addr, grpcOpts...)
+func establishSecureSessionWithCertPool(ctx context.Context, addr, authToken string, certPool *x509.CertPool) (*SecureSessionClient, error) {
+	client, err := newSecureSessionClient(addr, authToken, certPool)
 
 	if err != nil {
 		return nil, fmt.Errorf("error creating a secure session client: %v", err)
@@ -162,16 +156,10 @@ func EstablishSecureSession(ctx context.Context, addr, authToken string) (*Secur
 
 // newClient returns a new SecureSessionClient object that connects to a
 // secure session service at the given address.
-func newSecureSessionClient(addr string, opts ...grpc.DialOption) (*SecureSessionClient, error) {
-	conn, err := grpc.Dial(addr, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("error creating client connection: %v", err)
-	}
-
+func newSecureSessionClient(addr, authToken string, certPool *x509.CertPool) (*SecureSessionClient, error) {
 	c := &SecureSessionClient{}
 
-	c.client = pb.NewConfidentialEkmSessionEstablishmentServiceClient(conn)
-	c.wrapClient = cwgrpc.NewConfidentialWrapUnwrapServiceClient(conn)
+	c.client = confidentialEkmClient{uri: addr, authToken: authToken, certPool: certPool}
 	c.shim = transportshim.NewTransportShim()
 
 	// Set up the TLS client object.
@@ -218,7 +206,7 @@ func (c *SecureSessionClient) beginSession(ctx context.Context) error {
 	}
 
 	if resp.GetSessionContext() == nil {
-		return errors.New("Failed to initialize session; likely authentiation error")
+		return errors.New("Failed to initialize session; likely authentication error")
 	}
 
 	// Update the state of the session.
@@ -483,7 +471,7 @@ func (c *SecureSessionClient) ConfidentialWrap(ctx context.Context, keyPath, res
 	}
 
 	// Make RPC, session-encrypt the records, and unmarshal the inner WrapResponse.
-	resp, err := c.wrapClient.ConfidentialWrap(ctx, req)
+	resp, err := c.client.ConfidentialWrap(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("error session-encrypting the records: %v", err)
 	}
@@ -545,7 +533,7 @@ func (c *SecureSessionClient) ConfidentialUnwrap(ctx context.Context, keyPath, r
 	}
 
 	// Make RPC, session-decrypt the records, and unmarshal the inner WrapResponse.
-	resp, err := c.wrapClient.ConfidentialUnwrap(ctx, req)
+	resp, err := c.client.ConfidentialUnwrap(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("error session-decrypting the records: %v", err)
 	}

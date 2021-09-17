@@ -43,7 +43,6 @@ import (
 const (
 	// Identifier for GCP KMS used in KEK URIs, from https://developers.google.com/tink/get-key-uri
 	gcpKeyPrefix = "gcp-kms://"
-	proxyPort    = 8842
 )
 
 // DecryptedData represents data decrypted by the client and the associated metadata.
@@ -124,7 +123,7 @@ func parseEKMKeyURI(keyURI string) (string, string, error) {
 		return "", "", fmt.Errorf("could not parse: %v", err)
 	}
 
-	addr := fmt.Sprintf("%s://%s:%v", u.Scheme, u.Hostname(), proxyPort)
+	addr := fmt.Sprintf("%s://%s", u.Scheme, u.Hostname())
 	return addr, path.Base(keyURI), nil
 }
 
@@ -144,12 +143,7 @@ func (c *StetClient) ekmSecureSessionWrap(ctx context.Context, unwrappedShare []
 			return nil, err
 		}
 
-		rpcAddr, err := removeSchemeFromURL(addr)
-		if err != nil {
-			return nil, err
-		}
-
-		ekmClient, err = EstablishSecureSession(ctx, rpcAddr, authToken)
+		ekmClient, err = EstablishSecureSession(ctx, md.uri, authToken)
 		if err != nil {
 			return nil, fmt.Errorf("error establishing secure session: %v", err)
 		}
@@ -183,12 +177,7 @@ func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []
 			return nil, err
 		}
 
-		rpcAddr, err := removeSchemeFromURL(addr)
-		if err != nil {
-			return nil, err
-		}
-
-		ekmClient, err = EstablishSecureSession(ctx, rpcAddr, authToken)
+		ekmClient, err = EstablishSecureSession(ctx, addr, authToken)
 		if err != nil {
 			return nil, fmt.Errorf("error establishing secure session: %v", err)
 		}
