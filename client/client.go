@@ -177,7 +177,7 @@ func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []
 			return nil, err
 		}
 
-		ekmClient, err = EstablishSecureSession(ctx, addr, authToken)
+		ekmClient, err = EstablishSecureSession(ctx, md.uri, authToken)
 		if err != nil {
 			return nil, fmt.Errorf("error establishing secure session: %v", err)
 		}
