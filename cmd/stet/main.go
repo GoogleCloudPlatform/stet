@@ -19,6 +19,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"syscall"
 
@@ -115,24 +116,15 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		return subcommands.ExitFailure
 	}
 
-	var plaintext []byte
+	var plaintext io.Reader
 
 	if f.Arg(0) == "-" {
 		// Read input from stdin.
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Split(bufio.ScanBytes)
-		for scanner.Scan() {
-			plaintext = append(plaintext, scanner.Bytes()...)
-		}
-
-		if err := scanner.Err(); err != nil {
-			glog.Errorf("Error reading input from stdin: %v", err.Error())
-			return subcommands.ExitFailure
-		}
+		plaintext = os.Stdin
 	} else {
-		plaintext, err = os.ReadFile(f.Arg(0))
+		plaintext, err = os.Open(f.Arg(0))
 		if err != nil {
-			glog.Errorf("Failed to read plaintext file: %v", err.Error())
+			glog.Errorf("Failed to open plaintext file: %v", err.Error())
 			return subcommands.ExitFailure
 		}
 	}
@@ -301,12 +293,6 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		return subcommands.ExitFailure
 	}
 
-	decryptedData, err := c.Decrypt(ctx, encryptedData, stetConfig.GetDecryptConfig(), stetConfig.GetAsymmetricKeys())
-	if err != nil {
-		glog.Errorf("Failed to decrypt ciphertext: %v", err.Error())
-		return subcommands.ExitFailure
-	}
-
 	var outFile *os.File
 	var logFile *os.File
 
@@ -325,8 +311,9 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		logFile = os.Stdout
 	}
 
-	if _, err := outFile.Write(decryptedData.Plaintext); err != nil {
-		glog.Errorf("Failed to write plaintext to disk: %v", err.Error())
+	decryptedData, err := c.Decrypt(ctx, encryptedData, outFile, stetConfig.GetDecryptConfig(), stetConfig.GetAsymmetricKeys())
+	if err != nil {
+		glog.Errorf("Failed to decrypt ciphertext: %v", err.Error())
 		return subcommands.ExitFailure
 	}
 

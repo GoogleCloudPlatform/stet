@@ -16,6 +16,7 @@
 package client
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -25,6 +26,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"hash/crc32"
+	"io"
 	"net/url"
 	"os"
 	"path"
@@ -45,11 +47,10 @@ const (
 	gcpKeyPrefix = "gcp-kms://"
 )
 
-// DecryptedData represents data decrypted by the client and the associated metadata.
-type DecryptedData struct {
-	Plaintext []byte
-	KeyUris   []string
-	BlobID    string
+// DecryptedMetadata represents metadata associated with data decrypted by the client.
+type DecryptedMetadata struct {
+	KeyUris []string
+	BlobID  string
 }
 
 // unwrappedShare represents an unwrapped share and its associated external URI.
@@ -540,7 +541,7 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 }
 
 // Encrypt generates a DEK and creates EncryptedData in accordance with the EKM encryption protocol.
-func (c *StetClient) Encrypt(ctx context.Context, plaintext []byte, config *configpb.EncryptConfig, keys *configpb.AsymmetricKeys, blobID string) (*configpb.EncryptedData, error) {
+func (c *StetClient) Encrypt(ctx context.Context, plaintext io.Reader, config *configpb.EncryptConfig, keys *configpb.AsymmetricKeys, blobID string) (*configpb.EncryptedData, error) {
 	// Create metadata.
 	metadata := &configpb.Metadata{}
 
@@ -603,20 +604,20 @@ func (c *StetClient) Encrypt(ctx context.Context, plaintext []byte, config *conf
 		return nil, fmt.Errorf("Error serializing metadata: %v", err)
 	}
 
-	ciphertext, err := aeadEncrypt(dataEncryptionKey, plaintext, aad)
-	if err != nil {
+	var output bytes.Buffer
+	if err := aeadEncrypt(dataEncryptionKey, plaintext, &output, aad); err != nil {
 		return nil, fmt.Errorf("error encrypting data: %v", err)
 	}
 
 	return &configpb.EncryptedData{
-		Ciphertext: ciphertext,
+		Ciphertext: output.Bytes(),
 		Metadata:   metadata,
 	}, nil
 }
 
-// Decrypt returns the plaintext as bytes, the key URIs used during decryption,
-// and the blob ID decrypted.
-func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, config *configpb.DecryptConfig, keys *configpb.AsymmetricKeys) (*DecryptedData, error) {
+// Decrypt writes the decrypted data to the `output` writer, and returns the
+// key URIs used during decryption and the blob ID decrypted.
+func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, output io.Writer, config *configpb.DecryptConfig, keys *configpb.AsymmetricKeys) (*DecryptedMetadata, error) {
 	// Find matching KeyConfig.
 	var matchingKeyConfig *configpb.KeyConfig
 
@@ -681,8 +682,9 @@ func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, 
 		return nil, fmt.Errorf("error serializing metadata: %v", err)
 	}
 
-	plaintext, err := aeadDecrypt(combinedDEK, data.Ciphertext, aad)
-	if err != nil {
+	input := bytes.NewBuffer(data.Ciphertext)
+
+	if err := aeadDecrypt(combinedDEK, input, output, aad); err != nil {
 		return nil, fmt.Errorf("error decrypting data: %v", err)
 	}
 
@@ -697,9 +699,8 @@ func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, 
 		}
 	}
 
-	return &DecryptedData{
-		Plaintext: plaintext,
-		KeyUris:   keyURIs,
-		BlobID:    data.Metadata.GetBlobId(),
+	return &DecryptedMetadata{
+		KeyUris: keyURIs,
+		BlobID:  data.Metadata.GetBlobId(),
 	}, nil
 }

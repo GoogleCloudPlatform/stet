@@ -17,7 +17,6 @@
 package client
 
 import (
-	"bytes"
 	"fmt"
 	"io"
 
@@ -32,61 +31,46 @@ const (
 	aeadChunkSize          = 128
 )
 
-// aeadEncrypt uses the provided key and AAD to encrypt the provided plaintext.
-func aeadEncrypt(key DEK, plaintext, aad []byte) ([]byte, error) {
+// aeadEncrypt uses the provided key and AAD to encrypt the plaintext passed in
+// via `input`, writing the output to `output`.
+func aeadEncrypt(key DEK, input io.Reader, output io.Writer, aad []byte) error {
 	cipher, err := subtle.NewAESGCMHKDF(key[:], aeadHKDFAlg, int(DEKBytes), aeadSegmentSize, aeadFirstSegmentOffset)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create new cipher: %v", err)
+		return fmt.Errorf("unable to create new cipher: %v", err)
 	}
 
-	ciphertextBuf := &bytes.Buffer{}
-	writer, err := cipher.NewEncryptingWriter(ciphertextBuf, aad)
+	writer, err := cipher.NewEncryptingWriter(output, aad)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create an encrypt writer: %v", err)
+		return fmt.Errorf("unable to create encrypt writer: %v", err)
 	}
 
-	bytesWritten, err := writer.Write(plaintext)
-	if err != nil {
-		return nil, fmt.Errorf("unable to write to the encrypt writer: %v", err)
-	}
-
-	if bytesWritten != len(plaintext) {
-		return nil, fmt.Errorf("did not write expected number of bytes. Got %d, want %d", bytesWritten, len(plaintext))
+	if _, err := io.Copy(writer, input); err != nil {
+		return fmt.Errorf("failed to encrypt: %v", err)
 	}
 
 	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("error closing writer: %v", err)
+		return fmt.Errorf("error closing writer: %v", err)
 	}
 
-	return ciphertextBuf.Bytes(), nil
+	return nil
 }
 
-// aeadDecrypt uses the provided key and AAD to decode ciphertext and return the resulting plaintext.
-func aeadDecrypt(key DEK, ciphertext, aad []byte) ([]byte, error) {
+// aeadDecrypt uses the provided key and AAD to decode the ciphertext passed
+// in via `input`, writing the output to `output.
+func aeadDecrypt(key DEK, input io.Reader, output io.Writer, aad []byte) error {
 	cipher, err := subtle.NewAESGCMHKDF(key[:], aeadHKDFAlg, int(DEKBytes), aeadSegmentSize, aeadFirstSegmentOffset)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create new cipher: %v", err)
+		return fmt.Errorf("unable to create new cipher: %v", err)
 	}
 
-	reader, err := cipher.NewDecryptingReader(bytes.NewBuffer(ciphertext), aad)
+	reader, err := cipher.NewDecryptingReader(input, aad)
 	if err != nil {
-		return nil, fmt.Errorf("unable to create decrypt reader: %v", err)
+		return fmt.Errorf("unable to create decrypt reader: %v", err)
 	}
 
-	var (
-		chunk     = make([]byte, aeadChunkSize)
-		eof       = false
-		plaintext = []byte{}
-	)
-	for !eof {
-		bytesRead, err := reader.Read(chunk)
-		if err != nil && err != io.EOF {
-			return nil, fmt.Errorf("error reading chunk: %v", err)
-		}
-
-		eof = err == io.EOF
-		plaintext = append(plaintext, chunk[:bytesRead]...)
+	if _, err := io.Copy(output, reader); err != nil {
+		return fmt.Errorf("failed to decrypt: %w", err)
 	}
 
-	return plaintext, nil
+	return nil
 }

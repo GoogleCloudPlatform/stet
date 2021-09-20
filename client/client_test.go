@@ -1304,7 +1304,8 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			encryptedData, err := stetClient.Encrypt(ctx, tc.plaintext, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
+			plaintextBuf := bytes.NewReader(tc.plaintext)
+			encryptedData, err := stetClient.Encrypt(ctx, plaintextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
 			if err != nil {
 				t.Errorf("Encrypt(ctx, %v, %v, {}, %v) returned error \"%v\", want no error", tc.plaintext, encryptConfig, testBlobID, err)
 			}
@@ -1323,24 +1324,25 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 			}
 
 			// Decrypt the returned data and verify fields.
-			decryptedData, err := stetClient.Decrypt(ctx, encryptedData, decryptConfig, &configpb.AsymmetricKeys{})
+			var output bytes.Buffer
+			decryptedMd, err := stetClient.Decrypt(ctx, encryptedData, &output, decryptConfig, &configpb.AsymmetricKeys{})
 			if err != nil {
 				t.Fatalf("Error calling client.Decrypt(ctx, %v, %v, {}): %v", encryptedData, decryptConfig, err)
 			}
 
-			if decryptedData.BlobID != testBlobID {
-				t.Errorf("Decrypt(ctx, %v, %v, {}) does not contain the expected blob ID. Got %v, want %v", encryptedData, decryptConfig, decryptedData.BlobID, testBlobID)
+			if decryptedMd.BlobID != testBlobID {
+				t.Errorf("Decrypt(ctx, %v, %v, {}) does not contain the expected blob ID. Got %v, want %v", encryptedData, decryptConfig, decryptedMd.BlobID, testBlobID)
 			}
 
-			if len(decryptedData.KeyUris) != len(keyConfig.GetKekInfos()) {
-				t.Fatalf("Decrypt(ctx, %v, %v, {}) does not have the expected number of key URIS. Got %v, want %v", encryptedData, decryptConfig, len(decryptedData.KeyUris), len(keyConfig.GetKekInfos()))
+			if len(decryptedMd.KeyUris) != len(keyConfig.GetKekInfos()) {
+				t.Fatalf("Decrypt(ctx, %v, %v, {}) does not have the expected number of key URIS. Got %v, want %v", encryptedData, decryptConfig, len(decryptedMd.KeyUris), len(keyConfig.GetKekInfos()))
 			}
-			if decryptedData.KeyUris[0] != kekInfo.GetKekUri() {
-				t.Errorf("Decrypt(ctx, %v, %v, {}) does not contain the expected key URI. Got { %v }, want { %v }", encryptedData, decryptConfig, decryptedData.KeyUris[0], kekInfo.GetKekUri())
+			if decryptedMd.KeyUris[0] != kekInfo.GetKekUri() {
+				t.Errorf("Decrypt(ctx, %v, %v, {}) does not contain the expected key URI. Got { %v }, want { %v }", encryptedData, decryptConfig, decryptedMd.KeyUris[0], kekInfo.GetKekUri())
 			}
 
-			if !bytes.Equal(decryptedData.Plaintext, tc.plaintext) {
-				t.Errorf("Decrypt(ctx, %v, %v, {}) returned ciphertext thatdoes not match original plaintext. Got %v, want %v.", encryptedData, decryptConfig, decryptedData.Plaintext, tc.plaintext)
+			if !bytes.Equal(output.Bytes(), tc.plaintext) {
+				t.Errorf("Decrypt(ctx, %v, buffer, %v, {}) returned ciphertext that does not match original plaintext. Got %v, want %v.", encryptedData, decryptConfig, output.Bytes(), tc.plaintext)
 			}
 		})
 	}
@@ -1372,7 +1374,8 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 	stetClient.setFakeKeyManagementClient(fakeKMSClient)
 	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
 
-	_, err := stetClient.Encrypt(ctx, plaintext, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
+	plaintextBuf := bytes.NewReader(plaintext)
+	_, err := stetClient.Encrypt(ctx, plaintextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
 	if err == nil {
 		t.Errorf("Encrypt with no split option and more than one KekInfo in the KeyConfig should return an error")
 	}
@@ -1432,7 +1435,8 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			encryptedData, err := stetClient.Encrypt(ctx, tc.plaintext, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
+			plaintextBuf := bytes.NewReader(tc.plaintext)
+			encryptedData, err := stetClient.Encrypt(ctx, plaintextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
 			if err != nil {
 				t.Fatalf("Encrypt did not complete successfully: %v", err)
 			}
@@ -1448,24 +1452,25 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 			}
 
 			// Decrypt the returned data and verify fields.
-			decryptedData, err := stetClient.Decrypt(ctx, encryptedData, decryptConfig, &configpb.AsymmetricKeys{})
+			var output bytes.Buffer
+			decryptedMd, err := stetClient.Decrypt(ctx, encryptedData, &output, decryptConfig, &configpb.AsymmetricKeys{})
 			if err != nil {
 				t.Fatalf("Error decrypting data: %v", err)
 			}
 
-			if decryptedData.BlobID != testBlobID {
-				t.Errorf("Decrypted data does not contain the expected blob ID. Got %v, want %v", decryptedData.BlobID, testBlobID)
+			if decryptedMd.BlobID != testBlobID {
+				t.Errorf("Decrypted data does not contain the expected blob ID. Got %v, want %v", decryptedMd.BlobID, testBlobID)
 			}
 
-			if !bytes.Equal(decryptedData.Plaintext, tc.plaintext) {
-				t.Errorf("Decrypted ciphertext does not match original plaintext. Got %v, want %v.", decryptedData.Plaintext, tc.plaintext)
+			if !bytes.Equal(output.Bytes(), tc.plaintext) {
+				t.Errorf("Decrypted ciphertext does not match original plaintext. Got %v, want %v.", output.Bytes(), tc.plaintext)
 			}
 
-			if len(decryptedData.KeyUris) != len(keyConfig.GetKekInfos()) {
-				t.Fatalf("Decrypted data does not have the expected number of key URIS. Got %v, want %v", len(decryptedData.KeyUris), len(keyConfig.GetKekInfos()))
+			if len(decryptedMd.KeyUris) != len(keyConfig.GetKekInfos()) {
+				t.Fatalf("Decrypted data does not have the expected number of key URIS. Got %v, want %v", len(decryptedMd.KeyUris), len(keyConfig.GetKekInfos()))
 			}
-			if decryptedData.KeyUris[0] != kekInfo.GetKekUri() {
-				t.Errorf("Decrypted data does not contain the expected key URI. Got { %v }, want { %v }", decryptedData.KeyUris[0], kekInfo.GetKekUri())
+			if decryptedMd.KeyUris[0] != kekInfo.GetKekUri() {
+				t.Errorf("Decrypted data does not contain the expected key URI. Got { %v }, want { %v }", decryptedMd.KeyUris[0], kekInfo.GetKekUri())
 			}
 		})
 	}
@@ -1507,7 +1512,8 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 	stetClient.setFakeKeyManagementClient(fakeKMSClient)
 	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
 
-	_, err := stetClient.Encrypt(ctx, plaintext, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
+	plaintextBuf := bytes.NewReader(plaintext)
+	_, err := stetClient.Encrypt(ctx, plaintextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
 	if err == nil {
 		t.Errorf("Encrypt expected to fail due to invalid Shamir's Secret Sharing configuration.")
 	}
@@ -1555,7 +1561,8 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 	blobIDs := []string{}
 
 	for i := 0; i < 2; i++ {
-		data, err := stetClient.Encrypt(ctx, plaintext, &encryptConfig, &configpb.AsymmetricKeys{}, "")
+		plaintextBuf := bytes.NewReader(plaintext)
+		data, err := stetClient.Encrypt(ctx, plaintextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, "")
 		if err != nil {
 			t.Fatalf("Encrypt expected to succeed, but failed with: %v", err.Error())
 		}
@@ -1565,7 +1572,8 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 		}
 
 		// Decrypt to ensure the data can still be decrypted based on the blob ID in the metadata.
-		decryptedData, err := stetClient.Decrypt(ctx, data, decryptConfig, &configpb.AsymmetricKeys{})
+		var output bytes.Buffer
+		decryptedData, err := stetClient.Decrypt(ctx, data, &output, decryptConfig, &configpb.AsymmetricKeys{})
 		if err != nil {
 			t.Fatalf("Error decrypting data: %v", err)
 		}
@@ -1777,7 +1785,8 @@ func TestDecryptErrors(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := stetClient.Decrypt(ctx, tc.data, tc.config, &configpb.AsymmetricKeys{}); err == nil {
+			var output bytes.Buffer
+			if _, err := stetClient.Decrypt(ctx, tc.data, &output, tc.config, &configpb.AsymmetricKeys{}); err == nil {
 				t.Errorf("Got no error, want error related to %q.", tc.errSubstr)
 			}
 		})

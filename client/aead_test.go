@@ -24,17 +24,25 @@ func TestAeadEncryptAndAeadDecrypt(t *testing.T) {
 	testPT := []byte("Plaintext for testing only.")
 	testAAD := []byte("AAD for testing only.")
 
-	ciphertext, err := aeadEncrypt(testDEK, testPT, testAAD)
-	if err != nil {
+	encryptInput := bytes.NewReader(testPT)
+
+	var ciphertext []byte
+	encryptOutput := bytes.NewBuffer(ciphertext)
+
+	if err := aeadEncrypt(testDEK, encryptInput, encryptOutput, testAAD); err != nil {
 		t.Fatalf("AeadEncrypt failed with error %v", err)
 	}
 
-	plaintext, err := aeadDecrypt(testDEK, ciphertext, testAAD)
-	if err != nil {
+	decryptInput := encryptOutput
+
+	var plaintext []byte
+	decryptOutput := bytes.NewBuffer(plaintext)
+
+	if err := aeadDecrypt(testDEK, decryptInput, decryptOutput, testAAD); err != nil {
 		t.Fatalf("AeadDecrypt failed with error %v", err)
 	}
 
-	if !bytes.Equal(plaintext, testPT) {
+	if !bytes.Equal(decryptOutput.Bytes(), testPT) {
 		t.Errorf("AeadEncrypt and AeadDecrypt workflow does not restore original plaintext. Got %v, want %v", plaintext, testPT)
 	}
 }
@@ -44,8 +52,12 @@ func TestAeadDecryptFailsForInvalidCipherText(t *testing.T) {
 	testCT := []byte("This is some random invalid ciphertext.")
 	testAAD := []byte("AAD for testing only.")
 
-	_, err := aeadDecrypt(testDEK, testCT, testAAD)
-	if err == nil { // if no error
+	input := bytes.NewReader(testCT)
+
+	var plaintext []byte
+	output := bytes.NewBuffer(plaintext)
+
+	if err := aeadDecrypt(testDEK, input, output, testAAD); err == nil { // if no error
 		t.Error("aeadDecrypt expected to return error but did not.")
 	}
 }
@@ -56,13 +68,21 @@ func TestAeadDecryptFailsForNonmatchingAAD(t *testing.T) {
 	testEncryptAAD := []byte("AAD for encrypt testing only.")
 	testDecryptAAD := []byte("AAD for decrypt testing only.")
 
-	ciphertext, err := aeadEncrypt(testDEK, testPT, testEncryptAAD)
-	if err != nil {
+	encryptInput := bytes.NewReader(testPT)
+
+	var ciphertext []byte
+	encryptOutput := bytes.NewBuffer(ciphertext)
+
+	if err := aeadEncrypt(testDEK, encryptInput, encryptOutput, testEncryptAAD); err != nil {
 		t.Fatalf("AeadEncrypt failed with error %v", err)
 	}
 
-	_, err = aeadDecrypt(testDEK, ciphertext, testDecryptAAD)
-	if err == nil {
+	decryptInput := encryptOutput
+
+	var plaintext []byte
+	decryptOutput := bytes.NewBuffer(plaintext)
+
+	if err := aeadDecrypt(testDEK, decryptInput, decryptOutput, testDecryptAAD); err == nil {
 		t.Error("AeadDecrypt expected to return error due to mismatched AAD")
 	}
 }
