@@ -28,8 +28,8 @@ import (
 )
 
 var (
-	addr         = flag.String("addr", fmt.Sprintf("localhost:%d", constants.GrpcPort), "Service address of server")
-	audience     = flag.String("audience", "", "Audience for the JWT generation")
+	addr         = flag.String("addr", fmt.Sprintf("http://localhost:%d/v0/key/testPath", constants.HTTPPort), "Service address of server")
+	audience     = flag.String("audience", "bar", "Audience for the JWT generation")
 	authToken    = flag.String("auth_token", "", "Bearer JWT for RPC requests")
 	keyPath      = flag.String("key_path", "testPath", "The key path for wrapping/unwrapping")
 	plaintext    = flag.String("plaintext", "foobar", "The test plaintext to wrap and unwrap")
