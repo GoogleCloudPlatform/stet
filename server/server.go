@@ -72,8 +72,9 @@ type SecureSessionService struct {
 	channels map[string]*Channel
 	keys     map[string]string
 
-	// Necessary to embed this to maintain forward compatibility.
+	// Necessary to embed these to maintain forward compatibility.
 	pb.UnimplementedConfidentialEkmSessionEstablishmentServiceServer
+	cwpb.UnimplementedConfidentialWrapUnwrapServiceServer
 }
 
 // minUnchunkedAttestationSize used as hint to apply multiple
