@@ -12,23 +12,40 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-all: protoc-vendor protoc
+# All proto files should generate a .pb.go file
+PROTO_FILES = $(wildcard proto/*.proto)
+PROTO_GEN = $(foreach proto,$(patsubst proto/%.proto,%,$(PROTO_FILES)),proto/$(proto)_go_proto/$(proto).pb.go)
 
-protoc:
-	@protoc \
+# These protobufs need to be downloaded from other repositories
+PROTO_DEPS = \
+  proto/vendor/go-tpm-tools/proto/attest.proto \
+  proto/vendor/go-tpm-tools/proto/tpm.proto \
+  proto/vendor/googleapis/google/api/annotations.proto \
+  proto/vendor/googleapis/google/api/http.proto
+GO_TPM_TOOLS_VER=4ceb8e7
+GOOGLEAPIS_VER=1872f45
+
+# Default target should generate all .pb.go files
+all: $(PROTO_GEN)
+
+$(PROTO_GEN): $(PROTO_FILES) $(PROTO_DEPS)
+	protoc \
 		-I ./proto \
 		-I ./proto/vendor/go-tpm-tools \
 		-I ./proto/vendor/googleapis \
-		--go_out=. \
 		--go_opt=module=github.com/GoogleCloudPlatform/stet \
-		--go-grpc_out=. --go-grpc_opt=module=github.com/GoogleCloudPlatform/stet proto/*.proto
+		--go_out=. \
+		--go-grpc_opt=module=github.com/GoogleCloudPlatform/stet \
+		--go-grpc_out=. \
+		$(PROTO_FILES)
 
+proto/vendor/go-tpm-tools/%:
+	curl --create-dirs -sfLo $@ https://github.com/google/go-tpm-tools/raw/$(GO_TPM_TOOLS_VER)/$*
 
-protoc-vendor:
-	@rm -rf ./proto/vendor
-	@curl --create-dirs -sfLo ./proto/vendor/go-tpm-tools/proto/attest.proto https://github.com/google/go-tpm-tools/raw/master/proto/attest.proto
-	@curl --create-dirs -sfLo ./proto/vendor/go-tpm-tools/proto/tpm.proto https://github.com/google/go-tpm-tools/raw/master/proto/tpm.proto
-	@curl --create-dirs -sfLo ./proto/vendor/googleapis/google/api/annotations.proto https://github.com/googleapis/googleapis/raw/master/google/api/annotations.proto
-	@curl --create-dirs -sfLo ./proto/vendor/googleapis/google/api/http.proto https://github.com/googleapis/googleapis/raw/master/google/api/http.proto
+proto/vendor/googleapis/%:
+	curl --create-dirs -sfLo $@ https://github.com/googleapis/googleapis/raw/$(GOOGLEAPIS_VER)/$*
 
-.PHONY: all protoc protoc-vendor
+clean:
+	rm -rf proto/vendor proto/*_go_proto
+
+.PHONY: all
