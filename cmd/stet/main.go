@@ -16,7 +16,6 @@
 package main
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -29,7 +28,6 @@ import (
 	glog "github.com/golang/glog"
 	"github.com/google/subcommands"
 	"google.golang.org/protobuf/encoding/protojson"
-	"google.golang.org/protobuf/proto"
 	"sigs.k8s.io/yaml"
 )
 
@@ -116,13 +114,13 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		return subcommands.ExitFailure
 	}
 
-	var plaintext io.Reader
+	var inFile io.Reader
 
 	if f.Arg(0) == "-" {
 		// Read input from stdin.
-		plaintext = os.Stdin
+		inFile = os.Stdin
 	} else {
-		plaintext, err = os.Open(f.Arg(0))
+		inFile, err = os.Open(f.Arg(0))
 		if err != nil {
 			glog.Errorf("Failed to open plaintext file: %v", err.Error())
 			return subcommands.ExitFailure
@@ -131,18 +129,6 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 
 	// Initialize StetClient and encrypt plaintext.
 	c := client.StetClient{}
-
-	encryptedData, err := c.Encrypt(ctx, plaintext, stetConfig.GetEncryptConfig(), stetConfig.GetAsymmetricKeys(), e.blobID)
-	if err != nil {
-		glog.Errorf("Failed to encrypt plaintext: %v", err.Error())
-		return subcommands.ExitFailure
-	}
-
-	marshaled, err := proto.Marshal(encryptedData)
-	if err != nil {
-		glog.Errorf("Failed to serialize encrypted data: %v", err.Error())
-		return subcommands.ExitFailure
-	}
 
 	var outFile *os.File
 	var logFile *os.File
@@ -162,8 +148,8 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		logFile = os.Stdout
 	}
 
-	if _, err := outFile.Write(marshaled); err != nil {
-		glog.Errorf("Failed to write encrypted data to disk: %v", err.Error())
+	if err := c.Encrypt(ctx, inFile, outFile, stetConfig.GetEncryptConfig(), stetConfig.GetAsymmetricKeys(), e.blobID); err != nil {
+		glog.Errorf("Failed to encrypt plaintext: %v", err.Error())
 		return subcommands.ExitFailure
 	}
 
@@ -266,31 +252,17 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 	// Initialize StetClient and decrypt plaintext.
 	c := client.StetClient{}
 
-	var encryptedBytes []byte
+	var inFile io.Reader
+
 	if f.Arg(0) == "-" {
 		// Read input from stdin.
-		scanner := bufio.NewScanner(os.Stdin)
-		scanner.Split(bufio.ScanBytes)
-		for scanner.Scan() {
-			encryptedBytes = append(encryptedBytes, scanner.Bytes()...)
-		}
-
-		if err := scanner.Err(); err != nil {
-			glog.Errorf("Error reading input from stdin: %v", err.Error())
-			return subcommands.ExitFailure
-		}
+		inFile = os.Stdin
 	} else {
-		encryptedBytes, err = os.ReadFile(f.Arg(0))
+		inFile, err = os.Open(f.Arg(0))
 		if err != nil {
-			glog.Errorf("Failed to read encrypted data file: %v", err.Error())
+			glog.Errorf("Failed to open ciphertext file: %v", err.Error())
 			return subcommands.ExitFailure
 		}
-	}
-
-	encryptedData := &configpb.EncryptedData{}
-	if err := proto.Unmarshal(encryptedBytes, encryptedData); err != nil {
-		glog.Errorf("Failed to unmarshal encrypted data: %v", err.Error())
-		return subcommands.ExitFailure
 	}
 
 	var outFile *os.File
@@ -311,7 +283,7 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		logFile = os.Stdout
 	}
 
-	decryptedData, err := c.Decrypt(ctx, encryptedData, outFile, stetConfig.GetDecryptConfig(), stetConfig.GetAsymmetricKeys())
+	decryptedData, err := c.Decrypt(ctx, inFile, outFile, stetConfig.GetDecryptConfig(), stetConfig.GetAsymmetricKeys())
 	if err != nil {
 		glog.Errorf("Failed to decrypt ciphertext: %v", err.Error())
 		return subcommands.ExitFailure

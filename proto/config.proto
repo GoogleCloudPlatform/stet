@@ -120,12 +120,3 @@ message WrappedShare {
   // The SHA-256 hash of the actual (unwrapped) share. Required.
   bytes hash = 2;
 }
-
-// Data encrypted by the client and the associated metadata.
-message EncryptedData {
-  // The bytes of the encrypted plaintext. Required.
-  bytes ciphertext = 1;
-
-  // The metadata corresponding to the ciphertext. Required.
-  Metadata metadata = 2;
-}

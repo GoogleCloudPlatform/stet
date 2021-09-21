@@ -16,7 +16,6 @@
 package client
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
@@ -541,7 +540,7 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 }
 
 // Encrypt generates a DEK and creates EncryptedData in accordance with the EKM encryption protocol.
-func (c *StetClient) Encrypt(ctx context.Context, plaintext io.Reader, config *configpb.EncryptConfig, keys *configpb.AsymmetricKeys, blobID string) (*configpb.EncryptedData, error) {
+func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Writer, config *configpb.EncryptConfig, keys *configpb.AsymmetricKeys, blobID string) error {
 	// Create metadata.
 	metadata := &configpb.Metadata{}
 
@@ -564,7 +563,7 @@ func (c *StetClient) Encrypt(ctx context.Context, plaintext io.Reader, config *c
 	// Don't split the DEK.
 	case *configpb.KeyConfig_NoSplit:
 		if len(keyCfg.GetKekInfos()) != 1 {
-			return nil, fmt.Errorf("invalid Encrypt configuration, number of KekInfos is %v but expected 1 for 'no split' option", len(keyCfg.GetKekInfos()))
+			return fmt.Errorf("invalid Encrypt configuration, number of KekInfos is %v but expected 1 for 'no split' option", len(keyCfg.GetKekInfos()))
 		}
 
 		shares = [][]byte{dataEncryptionKey[:]}
@@ -577,17 +576,17 @@ func (c *StetClient) Encrypt(ctx context.Context, plaintext io.Reader, config *c
 
 		// The number of KEK Infos should match the number of shares to generate
 		if len(keyCfg.GetKekInfos()) != shamirShares {
-			return nil, fmt.Errorf("invalid Encrypt configuration, number of KEK Infos does not match the number of shares to generate: found %v KEK Infos, %v shares", len(keyCfg.GetKekInfos()), shamirShares)
+			return fmt.Errorf("invalid Encrypt configuration, number of KEK Infos does not match the number of shares to generate: found %v KEK Infos, %v shares", len(keyCfg.GetKekInfos()), shamirShares)
 		}
 
 		var err error
 		shares, err = SplitShares(dataEncryptionKey[:], shamirShares, shamirThreshold)
 		if err != nil {
-			return nil, fmt.Errorf("error splitting encryption key: %v", err)
+			return fmt.Errorf("error splitting encryption key: %v", err)
 		}
 
 	default:
-		return nil, fmt.Errorf("Unknown key splitting algorithm")
+		return fmt.Errorf("unknown key splitting algorithm")
 	}
 
 	metadata.KeyConfig = keyCfg
@@ -595,34 +594,63 @@ func (c *StetClient) Encrypt(ctx context.Context, plaintext io.Reader, config *c
 	var err error
 	metadata.Shares, err = c.wrapShares(ctx, shares, keyCfg.GetKekInfos(), keys)
 	if err != nil {
-		return nil, fmt.Errorf("Error wrapping shares: %v", err)
+		return fmt.Errorf("error wrapping shares: %v", err)
 	}
 
-	// Create AAD from metadata and perform AEAD encryption.
+	// Create AAD from metadata.
 	aad, err := metadataToAAD(metadata)
 	if err != nil {
-		return nil, fmt.Errorf("Error serializing metadata: %v", err)
+		return fmt.Errorf("error serializing metadata: %v", err)
 	}
 
-	var output bytes.Buffer
-	if err := aeadEncrypt(dataEncryptionKey, plaintext, &output, aad); err != nil {
-		return nil, fmt.Errorf("error encrypting data: %v", err)
+	// Marshal the metadata into serialized bytes.
+	metadataBytes, err := proto.Marshal(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to serialize metadata: %v", err)
 	}
 
-	return &configpb.EncryptedData{
-		Ciphertext: output.Bytes(),
-		Metadata:   metadata,
-	}, nil
+	// Write the header and metadata to `output`.
+	if err := writeHeader(output, len(metadataBytes)); err != nil {
+		return fmt.Errorf("failed to write encrypted file header: %v", err)
+	}
+
+	if _, err := output.Write(metadataBytes); err != nil {
+		return fmt.Errorf("failed to write metadata: %v", err)
+	}
+
+	// Pass `output` to the AEAD encryption function to write the ciphertext.
+	if err := aeadEncrypt(dataEncryptionKey, input, output, aad); err != nil {
+		return fmt.Errorf("error encrypting data: %v", err)
+	}
+
+	return nil
 }
 
 // Decrypt writes the decrypted data to the `output` writer, and returns the
 // key URIs used during decryption and the blob ID decrypted.
-func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, output io.Writer, config *configpb.DecryptConfig, keys *configpb.AsymmetricKeys) (*DecryptedMetadata, error) {
+func (c *StetClient) Decrypt(ctx context.Context, input io.Reader, output io.Writer, config *configpb.DecryptConfig, keys *configpb.AsymmetricKeys) (*DecryptedMetadata, error) {
+	// Read the STET header from the given `input`.
+	header, err := readHeader(input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read STET encrypted file header: %v", err)
+	}
+
+	// Based on the metadata length in `header`, read metadata from `input`.
+	metadataBytes := make([]byte, header.MetadataLen)
+	if _, err := input.Read(metadataBytes); err != nil {
+		return nil, fmt.Errorf("failed to read encrypted file metadata: %v", err)
+	}
+
+	metadata := &configpb.Metadata{}
+	if err := proto.Unmarshal(metadataBytes, metadata); err != nil {
+		return nil, fmt.Errorf("failed to unmarshal metadata proto: %v", err)
+	}
+
 	// Find matching KeyConfig.
 	var matchingKeyConfig *configpb.KeyConfig
 
 	for _, keyCfg := range config.GetKeyConfigs() {
-		if proto.Equal(keyCfg, data.Metadata.GetKeyConfig()) {
+		if proto.Equal(keyCfg, metadata.GetKeyConfig()) {
 			matchingKeyConfig = keyCfg
 			break
 		}
@@ -633,7 +661,7 @@ func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, 
 	}
 
 	// Unwrap shares and validate.
-	unwrappedShares, err := c.unwrapAndValidateShares(ctx, data.Metadata.GetShares(), matchingKeyConfig.GetKekInfos(), keys)
+	unwrappedShares, err := c.unwrapAndValidateShares(ctx, metadata.GetShares(), matchingKeyConfig.GetKekInfos(), keys)
 	if err != nil {
 		return nil, fmt.Errorf("error unwrapping and validating shares: %v", err)
 	}
@@ -677,13 +705,12 @@ func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, 
 	copy(combinedDEK[:], combinedShares)
 
 	// Generate AAD and decrypt ciphertext.
-	aad, err := metadataToAAD(data.Metadata)
+	aad, err := metadataToAAD(metadata)
 	if err != nil {
 		return nil, fmt.Errorf("error serializing metadata: %v", err)
 	}
 
-	input := bytes.NewBuffer(data.Ciphertext)
-
+	// Now `input` is at the start of ciphertext to pass to Tink.
 	if err := aeadDecrypt(combinedDEK, input, output, aad); err != nil {
 		return nil, fmt.Errorf("error decrypting data: %v", err)
 	}
@@ -701,6 +728,6 @@ func (c *StetClient) Decrypt(ctx context.Context, data *configpb.EncryptedData, 
 
 	return &DecryptedMetadata{
 		KeyUris: keyURIs,
-		BlobID:  data.Metadata.GetBlobId(),
+		BlobID:  metadata.GetBlobId(),
 	}, nil
 }

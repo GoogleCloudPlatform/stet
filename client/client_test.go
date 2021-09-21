@@ -25,6 +25,7 @@ import (
 	"cloud.google.com/go/kms/apiv1"
 	"github.com/google/tink/go/subtle/random"
 	"github.com/googleapis/gax-go"
+	"google.golang.org/protobuf/proto"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
@@ -1305,44 +1306,32 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			plaintextBuf := bytes.NewReader(tc.plaintext)
-			encryptedData, err := stetClient.Encrypt(ctx, plaintextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
-			if err != nil {
-				t.Errorf("Encrypt(ctx, %v, %v, {}, %v) returned error \"%v\", want no error", tc.plaintext, encryptConfig, testBlobID, err)
-			}
 
-			if encryptedData == nil {
-				t.Fatalf("Encrypt(ctx, %v, %v, {}, %v) = nil, want non-nil result", tc.plaintext, encryptConfig, testBlobID)
-			}
-
-			// Verify encrypted data has expected fields.
-			if len(encryptedData.Metadata.GetShares()) != 1 {
-				t.Fatalf("Encrypt(ctx, %v, %v, {}, %v) did not create the expected number of shares. Got %d, want 1.", tc.plaintext, encryptConfig, testBlobID, len(encryptedData.Metadata.GetShares()))
-			}
-
-			if encryptedData.Metadata.GetBlobId() != testBlobID {
-				t.Errorf("Encrypt(ctx, %v, %v, {}, %v) does not contain the expected blob ID. Got %v, want %v", tc.plaintext, encryptConfig, testBlobID, encryptedData.Metadata.GetBlobId(), testBlobID)
+			var ciphertextBuf bytes.Buffer
+			if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err != nil {
+				t.Errorf("Encrypt(ctx, %v, buf, %v, {}, %v) returned error \"%v\", want no error", tc.plaintext, encryptConfig, testBlobID, err)
 			}
 
 			// Decrypt the returned data and verify fields.
 			var output bytes.Buffer
-			decryptedMd, err := stetClient.Decrypt(ctx, encryptedData, &output, decryptConfig, &configpb.AsymmetricKeys{})
+			decryptedMd, err := stetClient.Decrypt(ctx, &ciphertextBuf, &output, decryptConfig, &configpb.AsymmetricKeys{})
 			if err != nil {
-				t.Fatalf("Error calling client.Decrypt(ctx, %v, %v, {}): %v", encryptedData, decryptConfig, err)
+				t.Fatalf("Error calling client.Decrypt(ctx, buf, buf, %v, {}): %v", decryptConfig, err)
 			}
 
 			if decryptedMd.BlobID != testBlobID {
-				t.Errorf("Decrypt(ctx, %v, %v, {}) does not contain the expected blob ID. Got %v, want %v", encryptedData, decryptConfig, decryptedMd.BlobID, testBlobID)
+				t.Errorf("Decrypt(ctx, input, output, %v, {}) does not contain the expected blob ID. Got %v, want %v", decryptConfig, decryptedMd.BlobID, testBlobID)
 			}
 
 			if len(decryptedMd.KeyUris) != len(keyConfig.GetKekInfos()) {
-				t.Fatalf("Decrypt(ctx, %v, %v, {}) does not have the expected number of key URIS. Got %v, want %v", encryptedData, decryptConfig, len(decryptedMd.KeyUris), len(keyConfig.GetKekInfos()))
+				t.Fatalf("Decrypt(ctx, input, output, %v, {}) does not have the expected number of key URIS. Got %v, want %v", decryptConfig, len(decryptedMd.KeyUris), len(keyConfig.GetKekInfos()))
 			}
 			if decryptedMd.KeyUris[0] != kekInfo.GetKekUri() {
-				t.Errorf("Decrypt(ctx, %v, %v, {}) does not contain the expected key URI. Got { %v }, want { %v }", encryptedData, decryptConfig, decryptedMd.KeyUris[0], kekInfo.GetKekUri())
+				t.Errorf("Decrypt(ctx, input, output, %v, {}) does not contain the expected key URI. Got { %v }, want { %v }", decryptConfig, decryptedMd.KeyUris[0], kekInfo.GetKekUri())
 			}
 
 			if !bytes.Equal(output.Bytes(), tc.plaintext) {
-				t.Errorf("Decrypt(ctx, %v, buffer, %v, {}) returned ciphertext that does not match original plaintext. Got %v, want %v.", encryptedData, decryptConfig, output.Bytes(), tc.plaintext)
+				t.Errorf("Decrypt(ctx, input, output, %v, {}) returned ciphertext that does not match original plaintext. Got %v, want %v.", decryptConfig, output.Bytes(), tc.plaintext)
 			}
 		})
 	}
@@ -1375,8 +1364,8 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
 
 	plaintextBuf := bytes.NewReader(plaintext)
-	_, err := stetClient.Encrypt(ctx, plaintextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
-	if err == nil {
+	var ciphertextBuf bytes.Buffer
+	if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err == nil {
 		t.Errorf("Encrypt with no split option and more than one KekInfo in the KeyConfig should return an error")
 	}
 }
@@ -1436,24 +1425,14 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			plaintextBuf := bytes.NewReader(tc.plaintext)
-			encryptedData, err := stetClient.Encrypt(ctx, plaintextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
-			if err != nil {
+			var ciphertextBuf bytes.Buffer
+			if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err != nil {
 				t.Fatalf("Encrypt did not complete successfully: %v", err)
-			}
-
-			// Verify encrypted data has expected fields.
-			if len(encryptedData.Metadata.GetShares()) != int(shamirConfig.GetShares()) {
-				t.Fatalf("Encrypt did not create the expected number of shares. Got %d, want %d.",
-					len(encryptedData.Metadata.GetShares()), shamirConfig.GetShares())
-			}
-
-			if encryptedData.Metadata.GetBlobId() != testBlobID {
-				t.Errorf("Encrypted data does not contain the expected blob ID. Got %v, want %v", encryptedData.Metadata.GetBlobId(), testBlobID)
 			}
 
 			// Decrypt the returned data and verify fields.
 			var output bytes.Buffer
-			decryptedMd, err := stetClient.Decrypt(ctx, encryptedData, &output, decryptConfig, &configpb.AsymmetricKeys{})
+			decryptedMd, err := stetClient.Decrypt(ctx, &ciphertextBuf, &output, decryptConfig, &configpb.AsymmetricKeys{})
 			if err != nil {
 				t.Fatalf("Error decrypting data: %v", err)
 			}
@@ -1513,8 +1492,8 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
 
 	plaintextBuf := bytes.NewReader(plaintext)
-	_, err := stetClient.Encrypt(ctx, plaintextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID)
-	if err == nil {
+	var ciphertextBuf bytes.Buffer
+	if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err == nil {
 		t.Errorf("Encrypt expected to fail due to invalid Shamir's Secret Sharing configuration.")
 	}
 }
@@ -1562,27 +1541,24 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 
 	for i := 0; i < 2; i++ {
 		plaintextBuf := bytes.NewReader(plaintext)
-		data, err := stetClient.Encrypt(ctx, plaintextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, "")
-		if err != nil {
-			t.Fatalf("Encrypt expected to succeed, but failed with: %v", err.Error())
-		}
 
-		if data.Metadata.GetBlobId() == "" {
-			t.Fatalf("Expected Encrypt to fill in blob ID with UUID")
+		var ciphertextBuf bytes.Buffer
+		if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, ""); err != nil {
+			t.Fatalf("Encrypt expected to succeed, but failed with: %v", err.Error())
 		}
 
 		// Decrypt to ensure the data can still be decrypted based on the blob ID in the metadata.
 		var output bytes.Buffer
-		decryptedData, err := stetClient.Decrypt(ctx, data, &output, decryptConfig, &configpb.AsymmetricKeys{})
+		decryptedMd, err := stetClient.Decrypt(ctx, &ciphertextBuf, &output, decryptConfig, &configpb.AsymmetricKeys{})
 		if err != nil {
 			t.Fatalf("Error decrypting data: %v", err)
 		}
 
-		if decryptedData.BlobID != data.Metadata.GetBlobId() {
-			t.Fatalf("Decrypted data does not contain the expected blob ID. Got %v, want %v", decryptedData.BlobID, data.Metadata.GetBlobId())
+		if decryptedMd.BlobID == "" {
+			t.Fatalf("Decrypted data contains unpopulated blob ID.")
 		}
 
-		blobIDs = append(blobIDs, data.Metadata.GetBlobId())
+		blobIDs = append(blobIDs, decryptedMd.BlobID)
 	}
 
 	if blobIDs[0] == blobIDs[1] {
@@ -1724,48 +1700,39 @@ func TestDecryptErrors(t *testing.T) {
 
 	testCases := []struct {
 		name      string
-		data      *configpb.EncryptedData
+		metadata  *configpb.Metadata
 		config    *configpb.DecryptConfig
 		errSubstr string
 	}{
 		{
 			name: "Missing matching KeyConfig during decryption",
-			data: &configpb.EncryptedData{
-				Ciphertext: ciphertext,
-				Metadata: &configpb.Metadata{
-					Shares:    []*configpb.WrappedShare{wrapped},
-					BlobId:    "I am blob.",
-					KeyConfig: &missingKeyCfg,
-				},
+			metadata: &configpb.Metadata{
+				Shares:    []*configpb.WrappedShare{wrapped},
+				BlobId:    "I am blob.",
+				KeyConfig: &missingKeyCfg,
 			},
 			config:    &decryptCfg,
 			errSubstr: "KeyConfig",
 		},
 		{
 			name: "Mismatched wrapped and hashed shares",
-			data: &configpb.EncryptedData{
-				Ciphertext: ciphertext,
-				Metadata: &configpb.Metadata{
-					Shares: []*configpb.WrappedShare{{
-						Share: testShare,
-						Hash:  testInvalidHashedShare,
-					}, wrapped},
-					BlobId:    "I am blob.",
-					KeyConfig: &keyCfg,
-				},
+			metadata: &configpb.Metadata{
+				Shares: []*configpb.WrappedShare{{
+					Share: testShare,
+					Hash:  testInvalidHashedShare,
+				}, wrapped},
+				BlobId:    "I am blob.",
+				KeyConfig: &keyCfg,
 			},
 			config:    &decryptCfg,
 			errSubstr: "unwrapped share",
 		},
 		{
 			name: "Too few shares for recombining DEK",
-			data: &configpb.EncryptedData{
-				Ciphertext: ciphertext,
-				Metadata: &configpb.Metadata{
-					Shares:    []*configpb.WrappedShare{wrapped},
-					BlobId:    "I am blob.",
-					KeyConfig: &singleURIKeyCfg,
-				},
+			metadata: &configpb.Metadata{
+				Shares:    []*configpb.WrappedShare{wrapped},
+				BlobId:    "I am blob.",
+				KeyConfig: &singleURIKeyCfg,
 			},
 			config: &configpb.DecryptConfig{
 				KeyConfigs: []*configpb.KeyConfig{&singleURIKeyCfg},
@@ -1785,8 +1752,23 @@ func TestDecryptErrors(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
+			// Simulate encryption and write to `input` buffer.
+			metadataBytes, err := proto.Marshal(tc.metadata)
+			if err != nil {
+				t.Fatalf("Failed to marshal metadata bytes: %v", err)
+			}
+
+			var input bytes.Buffer
+			if err := writeHeader(&input, len(metadataBytes)); err != nil {
+				t.Fatalf("Failed to write STET encrypted file header: %v", err)
+			}
+			if _, err := input.Write(metadataBytes); err != nil {
+				t.Fatalf("Failed to write metadata: %v", err)
+			}
+			input.Write(ciphertext)
+
 			var output bytes.Buffer
-			if _, err := stetClient.Decrypt(ctx, tc.data, &output, tc.config, &configpb.AsymmetricKeys{}); err == nil {
+			if _, err := stetClient.Decrypt(ctx, &input, &output, tc.config, &configpb.AsymmetricKeys{}); err == nil {
 				t.Errorf("Got no error, want error related to %q.", tc.errSubstr)
 			}
 		})
