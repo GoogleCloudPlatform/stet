@@ -223,7 +223,7 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 	}
 
 	serverSelection := attpb.AttestationEvidenceTypeList{}
-	selectedEvidence := attpb.AttestationEvidenceType_UNKNOWN
+	selectedEvidence := attpb.AttestationEvidenceType_UNKNOWN_EVIDENCE_TYPE
 	for _, tp := range clientAttList.Types {
 		if tp == attpb.AttestationEvidenceType_TPM2_QUOTE || tp == attpb.AttestationEvidenceType_TCG_EVENT_LOG || tp == attpb.AttestationEvidenceType_NULL_ATTESTATION {
 			selectedEvidence = tp
@@ -231,7 +231,7 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 		}
 	}
 
-	if selectedEvidence == attpb.AttestationEvidenceType_UNKNOWN {
+	if selectedEvidence == attpb.AttestationEvidenceType_UNKNOWN_EVIDENCE_TYPE {
 		ch.state = ServerStateFailed
 		return nil, fmt.Errorf("client's AttestationEvidenceTypeList not supported by the server")
 	}

@@ -1680,7 +1680,7 @@ func TestDecryptErrors(t *testing.T) {
 
 	missingKeyCfg := configpb.KeyConfig{
 		KekInfos:              kekInfos,
-		DekAlgorithm:          configpb.DekAlgorithm_UNKNOWN,
+		DekAlgorithm:          configpb.DekAlgorithm_UNKNOWN_DEK_ALGORITHM,
 		KeySplittingAlgorithm: &configpb.KeyConfig_Shamir{&shamirConfig},
 	}
 

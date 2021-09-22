@@ -31,7 +31,7 @@ message AttestationEvidence {
 // enumeration value corresponds with an optional field of the
 // AttestationEvidence message.
 enum AttestationEvidenceType {
-  UNKNOWN = 0;
+  UNKNOWN_EVIDENCE_TYPE = 0;
   NULL_ATTESTATION = 1;  // Indicates workload unable to produce attestation.
   TPM2_QUOTE = 2;        // AttestationEvidence.tpm2_quote
   TCG_EVENT_LOG = 3;     // AttestationEvidence.tcg_event_log

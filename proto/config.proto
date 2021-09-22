@@ -14,12 +14,12 @@
 
 syntax = "proto3";
 
-package stet.client.proto;
+package stet.proto;
 
 option go_package = "github.com/GoogleCloudPlatform/stet/proto/config_go_proto";
 
 enum DekAlgorithm {
-  UNKNOWN = 0;
+  UNKNOWN_DEK_ALGORITHM = 0;
   AES256_GCM = 1;
 }
 

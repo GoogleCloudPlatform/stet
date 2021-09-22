@@ -14,7 +14,7 @@
 
 syntax = "proto3";
 
-package google.cloud.googlekeybroker.session.v0;
+package stet.proto;
 
 import "google/api/annotations.proto";
 
