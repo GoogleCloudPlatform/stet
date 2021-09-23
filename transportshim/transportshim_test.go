@@ -24,12 +24,9 @@ func TestShimSend(t *testing.T) {
 	shim := NewTransportShim()
 	fromServerMsg := "Server To Client Test Msg"
 
-	go func() {
-		_, err := shim.Write([]byte(fromServerMsg))
-		if err != nil {
-			t.Log("Expected Write to channel to succeed")
-		}
-	}()
+	if _, err := shim.Write([]byte(fromServerMsg)); err != nil {
+		t.Fatalf("Expected Write to channel to succeed")
+	}
 
 	// DrainSendBuf will block until data becomes available
 	if string(shim.DrainSendBuf()) != fromServerMsg {
@@ -51,19 +48,17 @@ func TestShimLargeWrite(t *testing.T) {
 	want := make([]byte, attestationLen)
 	rand.Read(want)
 
-	go func() {
-		for i := 0; i < 4; i++ {
-			// Simulate the TLS implementation writing to the shim by prepending
-			// a 12 byte empty "header" to each call to shim.Write(). This is a
-			// substitute for actually instantiating a crypto/tls instance and
-			// writing to it.
-			header := make([]byte, overhead)
-			write := want[i*sliceLen : (i+1)*sliceLen]
-			if _, err := shim.Write(append(header, write...)); err != nil {
-				t.Log("Expected Write to channel to succeed")
-			}
+	for i := 0; i < 4; i++ {
+		// Simulate the TLS implementation writing to the shim by prepending
+		// a 12 byte empty "header" to each call to shim.Write(). This is a
+		// substitute for actually instantiating a crypto/tls instance and
+		// writing to it.
+		header := make([]byte, overhead)
+		write := want[i*sliceLen : (i+1)*sliceLen]
+		if _, err := shim.Write(append(header, write...)); err != nil {
+			t.Fatalf("Expected Write to channel to succeed")
 		}
-	}()
+	}
 
 	res := shim.DrainSendBuf()
 	var got []byte
