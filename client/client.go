@@ -541,6 +541,10 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 
 // Encrypt generates a DEK and creates EncryptedData in accordance with the EKM encryption protocol.
 func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Writer, config *configpb.EncryptConfig, keys *configpb.AsymmetricKeys, blobID string) error {
+	if config == nil {
+		return fmt.Errorf("nil EncryptConfig passed to Encrypt()")
+	}
+
 	// Create metadata.
 	metadata := &configpb.Metadata{}
 
@@ -629,6 +633,10 @@ func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Wri
 // Decrypt writes the decrypted data to the `output` writer, and returns the
 // key URIs used during decryption and the blob ID decrypted.
 func (c *StetClient) Decrypt(ctx context.Context, input io.Reader, output io.Writer, config *configpb.DecryptConfig, keys *configpb.AsymmetricKeys) (*DecryptedMetadata, error) {
+	if config == nil {
+		return nil, fmt.Errorf("nil DecryptConfig passed to Decrypt()")
+	}
+
 	// Read the STET header from the given `input`.
 	header, err := readHeader(input)
 	if err != nil {

@@ -1566,6 +1566,16 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 	}
 }
 
+func TestEncryptFailsWithNilConfig(t *testing.T) {
+	var stetClient StetClient
+
+	plaintextBuf := bytes.NewReader([]byte("This is data to be encrypted."))
+	var ciphertextBuf bytes.Buffer
+	if err := stetClient.Encrypt(context.Background(), plaintextBuf, &ciphertextBuf, nil, &configpb.AsymmetricKeys{}, ""); err == nil {
+		t.Errorf("Encrypt expected to fail due to nil EncryptConfig.")
+	}
+}
+
 func TestUnwrapKMSShareSucceeds(t *testing.T) {
 	expectedShare := []byte("Google, let me into the office for fooooddd")
 	testCases := []struct {
@@ -1704,6 +1714,16 @@ func TestDecryptErrors(t *testing.T) {
 		config    *configpb.DecryptConfig
 		errSubstr string
 	}{
+		{
+			name: "No DecryptConfig passed to Decrypt",
+			metadata: &configpb.Metadata{
+				Shares:    []*configpb.WrappedShare{wrapped},
+				BlobId:    "I am blob.",
+				KeyConfig: &keyCfg,
+			},
+			config:    nil,
+			errSubstr: "DecryptConfig",
+		},
 		{
 			name: "Missing matching KeyConfig during decryption",
 			metadata: &configpb.Metadata{

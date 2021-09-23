@@ -109,6 +109,11 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		return subcommands.ExitFailure
 	}
 
+	if stetConfig.GetEncryptConfig() == nil {
+		glog.Errorf("No EncryptConfig stanza found in config file")
+		return subcommands.ExitFailure
+	}
+
 	if f.NArg() < 2 {
 		glog.Errorf("Not enough arguments (expected plaintext file and encrypted file)")
 		return subcommands.ExitFailure
@@ -241,6 +246,11 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 	stetConfig := &configpb.StetConfig{}
 	if err := protojson.Unmarshal(jsonBytes, stetConfig); err != nil {
 		glog.Errorf("Failed to unmarshal StetConfig: %v", err.Error())
+		return subcommands.ExitFailure
+	}
+
+	if stetConfig.GetDecryptConfig() == nil {
+		glog.Errorf("No DecryptConfig stanza found in config file")
 		return subcommands.ExitFailure
 	}
 
