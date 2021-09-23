@@ -50,12 +50,12 @@ const (
 )
 
 const (
-	// KeyURI1 is the URI for key1 in the reference server.
-	KeyURI1 = "https://reference_server.com/v0/key1"
-	key1    = "key1encrypted"
-	// KeyURI2 is the URI for key2 in the reference server.
-	KeyURI2 = "https://reference_server.com/v0/key2"
-	key2    = "key2encrypted"
+	// KeyPath1 is the key path for key1 in the reference server.
+	KeyPath1 = "key1"
+	key1     = "key1encrypted"
+	// KeyPath2 is the key path for key2 in the reference server.
+	KeyPath2 = "key2"
+	key2     = "key2encrypted"
 )
 
 // Channel for connection internals
@@ -123,8 +123,8 @@ func NewSecureSessionService() (srv *SecureSessionService, err error) {
 	srv = &SecureSessionService{}
 	srv.channels = make(map[string]*Channel)
 	srv.keys = map[string]string{
-		KeyURI1: key1,
-		KeyURI2: key2,
+		KeyPath1: key1,
+		KeyPath2: key2,
 	}
 	return srv, nil
 }

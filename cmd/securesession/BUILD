@@ -24,6 +24,7 @@ go_binary(
     deps = [
         "//client",
         "//constants",
+        "//server",
         "@com_github_golang_glog//:glog",
     ],
 )

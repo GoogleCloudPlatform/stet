@@ -24,16 +24,17 @@ import (
 	"flag"
 	"github.com/GoogleCloudPlatform/stet/client"
 	"github.com/GoogleCloudPlatform/stet/constants"
+	"github.com/GoogleCloudPlatform/stet/server"
 	glog "github.com/golang/glog"
 )
 
 var (
-	addr         = flag.String("addr", fmt.Sprintf("http://localhost:%d/v0/key/testPath", constants.HTTPPort), "Service address of server")
+	addr         = flag.String("addr", fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath1), "Service address of server")
 	audience     = flag.String("audience", "bar", "Audience for the JWT generation")
 	authToken    = flag.String("auth_token", "", "Bearer JWT for RPC requests")
-	keyPath      = flag.String("key_path", "testPath", "The key path for wrapping/unwrapping")
+	keyPath      = flag.String("key_path", server.KeyPath1, "The key path for wrapping/unwrapping")
 	plaintext    = flag.String("plaintext", "foobar", "The test plaintext to wrap and unwrap")
-	resourceName = flag.String("resource", "foo", "The relative resource name of the key to wrap/unwrap")
+	resourceName = flag.String("resource", server.KeyPath1, "The relative resource name of the key to wrap/unwrap")
 )
 
 func main() {
