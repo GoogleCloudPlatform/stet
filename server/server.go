@@ -314,11 +314,7 @@ func (s *SecureSessionService) Finalize(ctx context.Context, req *sspb.FinalizeR
 			}
 		}
 
-		// 16 bytes to account for session key that gets appended.
-		AttestationPayloadOffset := len([]byte(constants.AttestationPrefix)) + 16
-
-		err := proto.Unmarshal(buf[AttestationPayloadOffset:offset], &clientAttEvidence)
-		if err != nil {
+		if err := proto.Unmarshal(buf[:offset], &clientAttEvidence); err != nil {
 			ch.state = ServerStateFailed
 			return nil, fmt.Errorf("failed to unmarshal AttestationEvidence: %w", err)
 		}
