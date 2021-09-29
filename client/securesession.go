@@ -130,10 +130,6 @@ func establishSecureSessionWithCertPool(ctx context.Context, addr, authToken str
 		return nil, fmt.Errorf("error beginning session establishment: %v", err)
 	}
 
-	if err := client.handshake(ctx); err != nil {
-		return nil, fmt.Errorf("error on initial handshake: %v", err)
-	}
-
 	// Continue making Handshake requests until the TLS handshake is complete.
 	for client.state != clientStateHandshakeCompleted {
 		if err := client.handshake(ctx); err != nil {
@@ -170,9 +166,10 @@ func newSecureSessionClient(addr, authToken string, certPool *x509.CertPool) (*S
 	}
 
 	cfg := &tls.Config{
+		CipherSuites:       constants.AllowableCipherSuites,
 		InsecureSkipVerify: true,
 		RootCAs:            roots,
-		MinVersion:         tls.VersionTLS13,
+		MinVersion:         tls.VersionTLS12,
 		MaxVersion:         tls.VersionTLS13,
 	}
 
@@ -213,8 +210,7 @@ func (c *SecureSessionClient) beginSession(ctx context.Context) error {
 	c.state = clientStateInitiated
 	c.ctx = resp.GetSessionContext()
 
-	// Write received TLS records back to the transport shim
-	// and send a signal to the receiveBufSig channel.
+	// Write received TLS records back to the transport shim.
 	c.shim.QueueReceiveBuf(resp.GetTlsRecords())
 
 	return nil
@@ -233,9 +229,8 @@ func (c *SecureSessionClient) handshake(ctx context.Context) error {
 		return fmt.Errorf("error continuing session establishment: %v", err)
 	}
 
-	if _, err = c.tls.Write(resp.GetTlsRecords()); err != nil {
-		return fmt.Errorf("error writing data to the connection: %v", err)
-	}
+	// Write received TLS records back to the transport shim.
+	c.shim.QueueReceiveBuf(resp.GetTlsRecords())
 
 	// Update state of client if TLS indicates handshake is complete.
 	if c.tls.ConnectionState().HandshakeComplete {

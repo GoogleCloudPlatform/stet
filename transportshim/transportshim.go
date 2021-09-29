@@ -96,16 +96,6 @@ func (shim *TransportShim) DrainSendBuf() []byte {
 	}
 }
 
-// DrainSendBufNonBlocking reads from `sendBuf` without blocking.
-func (shim *TransportShim) DrainSendBufNonBlocking() []byte {
-	select {
-	case b := <-shim.sendBuf:
-		return b
-	default:
-		return nil
-	}
-}
-
 func (shim *TransportShim) Write(b []byte) (n int, err error) {
 	buf := make([]byte, len(b))
 	copy(buf, b)

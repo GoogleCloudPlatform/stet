@@ -22,6 +22,5 @@ import (
 type ShimInterface interface {
 	net.Conn
 	DrainSendBuf() []byte
-	DrainSendBufNonBlocking() []byte
 	QueueReceiveBuf([]byte)
 }

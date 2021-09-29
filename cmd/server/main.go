@@ -16,6 +16,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
@@ -35,6 +36,7 @@ import (
 var (
 	grpcPort = flag.Int("grpc-port", constants.GrpcPort, "gRPC server port")
 	httpPort = flag.Int("port", constants.HTTPPort, "HTTP server port")
+	useTLS12 = flag.Bool("tls12", false, "Use TLS 1.2 for secure session")
 )
 
 func main() {
@@ -58,7 +60,13 @@ func main() {
 	reflection.Register(grpcServer)
 
 	// Register a new SecureSessionService instance to handle RPCs.
-	serv, _ := server.NewSecureSessionService()
+	var tlsVersion uint16
+	tlsVersion = tls.VersionTLS13
+	if *useTLS12 {
+		tlsVersion = tls.VersionTLS12
+	}
+
+	serv, _ := server.NewSecureSessionService(tlsVersion)
 	ssgrpc.RegisterConfidentialEkmSessionEstablishmentServiceServer(grpcServer, serv)
 	cwgrpc.RegisterConfidentialWrapUnwrapServiceServer(grpcServer, serv)
 

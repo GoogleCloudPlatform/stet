@@ -68,9 +68,10 @@ type Channel struct {
 
 // SecureSessionService implements the SecureSession interface.
 type SecureSessionService struct {
-	mu       sync.Mutex
-	channels map[string]*Channel
-	keys     map[string]string
+	tlsVersion uint16
+	mu         sync.Mutex
+	channels   map[string]*Channel
+	keys       map[string]string
 
 	// Necessary to embed these to maintain forward compatibility.
 	pb.UnimplementedConfidentialEkmSessionEstablishmentServiceServer
@@ -90,8 +91,7 @@ func (s *SecureSessionService) Wrap(keyURI string, aad, plaintext []byte) []byte
 }
 
 // NewChannel sets up tls context and network shim
-func NewChannel() (ch *Channel, err error) {
-
+func NewChannel(tlsVersion uint16) (ch *Channel, err error) {
 	ch = &Channel{}
 	ch.state = ServerStateUninitialized
 	ch.shim = ts.NewTransportShim()
@@ -101,7 +101,14 @@ func NewChannel() (ch *Channel, err error) {
 		return nil, fmt.Errorf("failed to create server credentials: %v", err)
 	}
 
-	conf := &tls.Config{Certificates: []tls.Certificate{crt}, MinVersion: tls.VersionTLS13, SessionTicketsDisabled: true, InsecureSkipVerify: true}
+	conf := &tls.Config{
+		Certificates:           []tls.Certificate{crt},
+		MinVersion:             tlsVersion,
+		MaxVersion:             tlsVersion,
+		CipherSuites:           constants.AllowableCipherSuites,
+		SessionTicketsDisabled: true,
+		InsecureSkipVerify:     true,
+	}
 	ch.conn = tls.Server(ch.shim, conf)
 	id, err := uuid.NewRandom()
 
@@ -119,8 +126,8 @@ func NewChannel() (ch *Channel, err error) {
 }
 
 // NewSecureSessionService creates instance of secure session service
-func NewSecureSessionService() (srv *SecureSessionService, err error) {
-	srv = &SecureSessionService{}
+func NewSecureSessionService(tlsVersion uint16) (srv *SecureSessionService, err error) {
+	srv = &SecureSessionService{tlsVersion: tlsVersion}
 	srv.channels = make(map[string]*Channel)
 	srv.keys = map[string]string{
 		KeyPath1: key1,
@@ -130,16 +137,14 @@ func NewSecureSessionService() (srv *SecureSessionService, err error) {
 }
 
 func (s *SecureSessionService) BeginSession(ctx context.Context, req *sspb.BeginSessionRequest) (*sspb.BeginSessionResponse, error) {
-
-	ch, err := NewChannel()
+	ch, err := NewChannel(s.tlsVersion)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to create new channnel: %v", err)
 	}
 
 	go func() {
-		err := ch.conn.Handshake()
-		if err != nil {
+		if err := ch.conn.Handshake(); err != nil {
 			glog.Warningf("Handshake failed with: %v", err.Error())
 		}
 	}()
@@ -163,7 +168,6 @@ func (s *SecureSessionService) BeginSession(ctx context.Context, req *sspb.Begin
 
 func (s *SecureSessionService) Handshake(ctx context.Context, req *sspb.HandshakeRequest) (*sspb.HandshakeResponse, error) {
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
-
 	ch, found := s.channels[connID]
 
 	if !found {
@@ -180,11 +184,38 @@ func (s *SecureSessionService) Handshake(ctx context.Context, req *sspb.Handshak
 
 	ch.shim.QueueReceiveBuf(req.TlsRecords)
 
-	rep := &sspb.HandshakeResponse{
-		TlsRecords: ch.shim.DrainSendBufNonBlocking(),
+	// With the "Client Hello" and "Server Hello" records having already been
+	// exchanged as part of the BeginSession request, the records exchanged
+	// during this part of the handshake are "Client Change Cipher Spec" and
+	// "Client Handshake Finished", both of which are sent simultaneously here.
+	//
+	// However, there is a divergence between the behaviour of TLS 1.2 and 1.3+
+	// at this point: while in 1.2, the server must then respond with its
+	// "Server Change Cipher Spec" and "Server Handshake Finished" records
+	// before the client starts sending application data, in 1.3, the client
+	// sends its application data directly following its "Client Handshake
+	// Finished" (that is, there is no waiting on a "Server Handshake Finished"
+	// from the server).
+	//
+	// Because of this, under TLS 1.2, the underlying TLS implementation has
+	// records to drain here and send as part of the handshake response, whereas
+	// with TLS 1.3, there are no bytes, and attempting a read from the TLS
+	// implementation would result in 0 bytes. Therefore, we simply return an
+	// empty byte slice as the records in the response.
+	var records []byte
+	if ch.conn.ConnectionState().Version == tls.VersionTLS12 {
+		records = ch.shim.DrainSendBuf()
 	}
 
-	ch.state = ServerStateHandshakeCompleted
+	rep := &sspb.HandshakeResponse{
+		TlsRecords: records,
+	}
+
+	// Update state if TLS indicates handshake is complete, otherwise
+	// we expect to perform another Handshake call from the client.
+	if ch.conn.ConnectionState().HandshakeComplete {
+		ch.state = ServerStateHandshakeCompleted
+	}
 	return rep, nil
 }
 
@@ -259,7 +290,6 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 }
 
 func (s *SecureSessionService) Finalize(ctx context.Context, req *sspb.FinalizeRequest) (*sspb.FinalizeResponse, error) {
-
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
 
