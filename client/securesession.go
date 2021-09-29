@@ -336,7 +336,7 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 
 		// Generate exported keying material and attestation.
 		tlsState := c.tls.ConnectionState()
-		material, err := tlsState.ExportKeyingMaterial(constants.ExportLabel, nil, 16)
+		material, err := tlsState.ExportKeyingMaterial(constants.ExportLabel, nil, 32)
 		if err != nil {
 			return fmt.Errorf("error exporting key material: %v", err)
 		}
