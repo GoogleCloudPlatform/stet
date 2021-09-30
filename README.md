@@ -4,9 +4,6 @@ The Split-Trust Encryption Tool (STET) allows users to encrypt and decrypt data
 while splitting trust between multiple Key Management Systems and providing
 environment attestations to aid in key release policy decisions.
 
-NOTE: STET is currently released as a preview and is not yet intended for
-production use.
-
 ## Building STET
 
 STET can be built manually using *either* Go's native toolchain (e.g. `go get`
@@ -252,6 +249,8 @@ $ some-process | stet decrypt - - | some-other-process
 ```
 
 ## License
+
+STET is not an officially supported Google product.
 
 STET is released under the [Apache 2.0 license](/LICENSE).
 
