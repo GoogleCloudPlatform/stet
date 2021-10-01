@@ -612,7 +612,7 @@ func TestWrapSharesIndividually(t *testing.T) {
 				},
 			}
 
-			wrappedShares, err := stetClient.wrapShares(ctx, [][]byte{testShare}, ki, &configpb.AsymmetricKeys{})
+			wrappedShares, _, err := stetClient.wrapShares(ctx, [][]byte{testShare}, ki, &configpb.AsymmetricKeys{})
 
 			if err != nil {
 				t.Fatalf("wrapShares returned with error: %v", err)
@@ -668,7 +668,7 @@ func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 	}
 
 	var stetClient StetClient
-	wrappedShares, err := stetClient.wrapShares(ctx, [][]byte{testShare}, ki, keys)
+	wrappedShares, keyURIs, err := stetClient.wrapShares(ctx, [][]byte{testShare}, ki, keys)
 
 	if err != nil {
 		t.Fatalf("wrapShares returned with error: %v", err)
@@ -680,6 +680,10 @@ func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 
 	if !bytes.Equal(wrappedShares[0].GetHash(), testHashedShare[:]) {
 		t.Errorf("wrapShares(ctx, %s, %v) did not return the expected hashed share. Got %v, want %v", testShare, ki, wrappedShares[0].GetHash(), testHashedShare)
+	}
+
+	if len(keyURIs) != 0 {
+		t.Fatalf("wrapShares(ctx, %s, %v) expected to return 0 key URIs, got %v", testShare, ki, len(keyURIs))
 	}
 
 	unwrappedShares, err := stetClient.unwrapAndValidateShares(ctx, wrappedShares, ki, keys)
@@ -773,7 +777,7 @@ func TestWrapUnwrapShareAsymmetricKeyError(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			var stetClient StetClient
-			wrappedShares, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, testCase.kekInfos, testCase.asymmetricKeys)
+			wrappedShares, _, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, testCase.kekInfos, testCase.asymmetricKeys)
 
 			if err == nil && testCase.errorOnWrap {
 				t.Errorf("wrapShares(%s, %s) expected to return error, but did not", testCase.unwrappedShares, testCase.kekInfos)
@@ -820,7 +824,7 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 	stetClient.setFakeKeyManagementClient(fakeKMSClient)
 	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
 
-	wrapped, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
+	wrapped, _, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
 
 	if err != nil {
 		t.Fatalf("wrapShares(%s, %s) returned with error %v", sharesList, kekInfoList, err)
@@ -964,7 +968,7 @@ func TestWrapSharesError(t *testing.T) {
 			var stetClient StetClient
 			stetClient.setFakeKeyManagementClient(fakeKMSClient)
 			stetClient.setFakeSecureSessionClient(testCase.fakeSSClient)
-			_, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
+			_, _, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
 
 			if err == nil {
 				t.Errorf("wrapShares(%s, %s) expected to return error, but did not", testCase.unwrappedShares, testCase.kekInfos)
@@ -1241,7 +1245,7 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 	stetClient.setFakeKeyManagementClient(fakeKmsClient)
 	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
 
-	wrapped, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
+	wrapped, _, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
 	if err != nil {
 		t.Fatalf("wrapShares(context.Background(), %v, %v, {}) returned with error %v", sharesList, kekInfoList, err)
 	}
@@ -1310,7 +1314,7 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 			plaintextBuf := bytes.NewReader(tc.plaintext)
 
 			var ciphertextBuf bytes.Buffer
-			if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err != nil {
+			if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err != nil {
 				t.Errorf("Encrypt(ctx, %v, buf, %v, {}, %v) returned error \"%v\", want no error", tc.plaintext, encryptConfig, testBlobID, err)
 			}
 
@@ -1367,7 +1371,7 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 
 	plaintextBuf := bytes.NewReader(plaintext)
 	var ciphertextBuf bytes.Buffer
-	if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err == nil {
+	if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err == nil {
 		t.Errorf("Encrypt with no split option and more than one KekInfo in the KeyConfig should return an error")
 	}
 }
@@ -1428,7 +1432,7 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			plaintextBuf := bytes.NewReader(tc.plaintext)
 			var ciphertextBuf bytes.Buffer
-			if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err != nil {
+			if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err != nil {
 				t.Fatalf("Encrypt did not complete successfully: %v", err)
 			}
 
@@ -1495,7 +1499,7 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 
 	plaintextBuf := bytes.NewReader(plaintext)
 	var ciphertextBuf bytes.Buffer
-	if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err == nil {
+	if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err == nil {
 		t.Errorf("Encrypt expected to fail due to invalid Shamir's Secret Sharing configuration.")
 	}
 }
@@ -1545,7 +1549,8 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 		plaintextBuf := bytes.NewReader(plaintext)
 
 		var ciphertextBuf bytes.Buffer
-		if err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, ""); err != nil {
+		encryptedMd, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, "")
+		if err != nil {
 			t.Fatalf("Encrypt expected to succeed, but failed with: %v", err.Error())
 		}
 
@@ -1556,8 +1561,8 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 			t.Fatalf("Error decrypting data: %v", err)
 		}
 
-		if decryptedMd.BlobID == "" {
-			t.Fatalf("Decrypted data contains unpopulated blob ID.")
+		if decryptedMd.BlobID != encryptedMd.BlobID {
+			t.Fatalf("Decrypted blob ID doesn't match encrypted blob ID: want %v, got %v", encryptedMd.BlobID, decryptedMd.BlobID)
 		}
 
 		blobIDs = append(blobIDs, decryptedMd.BlobID)
@@ -1573,7 +1578,7 @@ func TestEncryptFailsWithNilConfig(t *testing.T) {
 
 	plaintextBuf := bytes.NewReader([]byte("This is data to be encrypted."))
 	var ciphertextBuf bytes.Buffer
-	if err := stetClient.Encrypt(context.Background(), plaintextBuf, &ciphertextBuf, nil, &configpb.AsymmetricKeys{}, ""); err == nil {
+	if _, err := stetClient.Encrypt(context.Background(), plaintextBuf, &ciphertextBuf, nil, &configpb.AsymmetricKeys{}, ""); err == nil {
 		t.Errorf("Encrypt expected to fail due to nil EncryptConfig.")
 	}
 }

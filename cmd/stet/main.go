@@ -153,13 +153,20 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		logFile = os.Stdout
 	}
 
-	if err := c.Encrypt(ctx, inFile, outFile, stetConfig.GetEncryptConfig(), stetConfig.GetAsymmetricKeys(), e.blobID); err != nil {
+	md, err := c.Encrypt(ctx, inFile, outFile, stetConfig.GetEncryptConfig(), stetConfig.GetAsymmetricKeys(), e.blobID)
+	if err != nil {
 		glog.Errorf("Failed to encrypt plaintext: %v", err.Error())
 		return subcommands.ExitFailure
 	}
 
 	if !e.quiet {
 		logFile.WriteString(fmt.Sprintln("Wrote encrypted data to", outFile.Name()))
+
+		// Debug information to guard against authorship attacks.
+		logFile.WriteString(fmt.Sprintln("Blob ID of encrypted data:", md.BlobID))
+		if len(md.KeyUris) > 0 {
+			logFile.WriteString(fmt.Sprintln("Used these key URIs:", md.KeyUris))
+		}
 	}
 
 	return subcommands.ExitSuccess
@@ -293,7 +300,7 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		logFile = os.Stdout
 	}
 
-	decryptedData, err := c.Decrypt(ctx, inFile, outFile, stetConfig.GetDecryptConfig(), stetConfig.GetAsymmetricKeys())
+	md, err := c.Decrypt(ctx, inFile, outFile, stetConfig.GetDecryptConfig(), stetConfig.GetAsymmetricKeys())
 	if err != nil {
 		glog.Errorf("Failed to decrypt ciphertext: %v", err.Error())
 		return subcommands.ExitFailure
@@ -303,9 +310,9 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		logFile.WriteString(fmt.Sprintln("Wrote plaintext to", outFile.Name()))
 
 		// Debug information to guard against authorship attacks.
-		logFile.WriteString(fmt.Sprintln("Blob ID of decrypted data:", decryptedData.BlobID))
-		if len(decryptedData.KeyUris) > 0 {
-			logFile.WriteString(fmt.Sprintln("Used these key URIs:", decryptedData.KeyUris))
+		logFile.WriteString(fmt.Sprintln("Blob ID of decrypted data:", md.BlobID))
+		if len(md.KeyUris) > 0 {
+			logFile.WriteString(fmt.Sprintln("Used these key URIs:", md.KeyUris))
 		}
 	}
 

@@ -47,8 +47,8 @@ const (
 	gcpKeyPrefix = "gcp-kms://"
 )
 
-// DecryptedMetadata represents metadata associated with data decrypted by the client.
-type DecryptedMetadata struct {
+// StetMetadata represents metadata associated with data encrypted/decrypted by the client.
+type StetMetadata struct {
 	KeyUris []string
 	BlobID  string
 }
@@ -339,16 +339,19 @@ func publicKeyForRSAFingerprint(kek *configpb.KekInfo, keys *configpb.Asymmetric
 	return nil, fmt.Errorf("no RSA public key found for fingerprint: %s", kek.GetRsaFingerprint())
 }
 
-// wrapShares encrypts the given shares based on their URIs.
-func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, kekInfos []*configpb.KekInfo, keys *configpb.AsymmetricKeys) ([]*configpb.WrappedShare, error) {
+// wrapShares encrypts the given shares using either the given key URIs or the
+// asymmetric key provided in the corresponding KekInfo struct. It returns a
+// list of wrapped shares, and a list of key URIs used for shares that were
+// wrapped by communicating with an external KMS (these lists might not
+// correspond one-to-one if some shares are wrapped via asymmetric key).
+func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, kekInfos []*configpb.KekInfo, keys *configpb.AsymmetricKeys) (wrappedShares []*configpb.WrappedShare, keyURIs []string, err error) {
 	if len(unwrappedShares) != len(kekInfos) {
-		return nil, fmt.Errorf("number of shares to wrap (%d) does not match number of KEKs (%d)", len(unwrappedShares), len(kekInfos))
+		return nil, nil, fmt.Errorf("number of shares to wrap (%d) does not match number of KEKs (%d)", len(unwrappedShares), len(kekInfos))
 	}
 
 	// Gets populated once the first non-local key is seen.
 	var kekMetadatas []kekMetadata
 
-	var wrappedShares []*configpb.WrappedShare
 	for i, share := range unwrappedShares {
 		wrapped := &configpb.WrappedShare{
 			Hash: HashShare(share),
@@ -360,18 +363,18 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 		case *configpb.KekInfo_RsaFingerprint:
 			key, err := publicKeyForRSAFingerprint(kek, keys)
 			if err != nil {
-				return nil, fmt.Errorf("failed to find public key for RSA fingerprint: %w", err)
+				return nil, nil, fmt.Errorf("failed to find public key for RSA fingerprint: %w", err)
 			}
 
 			wrapped.Share, err = rsa.EncryptOAEP(sha256.New(), rand.Reader, key, share, nil)
 			if err != nil {
-				return nil, fmt.Errorf("error wrapping key share: %v", err)
+				return nil, nil, fmt.Errorf("error wrapping key share: %v", err)
 			}
 
 		case *configpb.KekInfo_KekUri:
 			// Instantiate `kmsClient` and populate `kekMetadatas` if not already done.
 			if err := c.initializeKMSClient(ctx); err != nil {
-				return nil, fmt.Errorf("error initializing KMS Client: %v", err)
+				return nil, nil, fmt.Errorf("error initializing KMS Client: %v", err)
 			}
 			defer c.kmsClient.Close()
 
@@ -379,7 +382,7 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 				var err error
 				kekMetadatas, err = protectionLevelsAndUris(ctx, c.kmsClient, kekInfos)
 				if err != nil {
-					return nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
+					return nil, nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
 				}
 			}
 
@@ -389,26 +392,31 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 				var err error
 				wrapped.Share, err = wrapKMSShare(ctx, c.kmsClient, share, kekMetadatas[i].resourceName)
 				if err != nil {
-					return nil, fmt.Errorf("error wrapping key share: %v", err)
+					return nil, nil, fmt.Errorf("error wrapping key share: %v", err)
 				}
 			case rpb.ProtectionLevel_EXTERNAL:
 				ekmWrappedShare, err := c.ekmSecureSessionWrap(ctx, share, kekMetadatas[i])
 				if err != nil {
-					return nil, fmt.Errorf("error wrapping with secure session: %v", err)
+					return nil, nil, fmt.Errorf("error wrapping with secure session: %v", err)
 				}
 
 				wrapped.Share = ekmWrappedShare
 			default:
-				return nil, fmt.Errorf("unsupported protection level %v", pl)
+				return nil, nil, fmt.Errorf("unsupported protection level %v", pl)
 			}
+
+			// Return the URI used: the Cloud KMS one in the case of a software
+			// or HSM key, and the external key URI for an external key.
+			keyURIs = append(keyURIs, kekMetadatas[i].uri)
+
 		default:
-			return nil, fmt.Errorf("unsupported KekInfo type: %v", x)
+			return nil, nil, fmt.Errorf("unsupported KekInfo type: %v", x)
 		}
 
 		wrappedShares = append(wrappedShares, wrapped)
 	}
 
-	return wrappedShares, nil
+	return wrappedShares, keyURIs, nil
 }
 
 func unwrapKMSShare(ctx context.Context, kmsClient cloudKMSClient, wrappedShare []byte, keyName string) ([]byte, error) {
@@ -556,9 +564,9 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 }
 
 // Encrypt generates a DEK and creates EncryptedData in accordance with the EKM encryption protocol.
-func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Writer, config *configpb.EncryptConfig, keys *configpb.AsymmetricKeys, blobID string) error {
+func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Writer, config *configpb.EncryptConfig, keys *configpb.AsymmetricKeys, blobID string) (*StetMetadata, error) {
 	if config == nil {
-		return fmt.Errorf("nil EncryptConfig passed to Encrypt()")
+		return nil, fmt.Errorf("nil EncryptConfig passed to Encrypt()")
 	}
 
 	// Create metadata.
@@ -583,7 +591,7 @@ func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Wri
 	// Don't split the DEK.
 	case *configpb.KeyConfig_NoSplit:
 		if len(keyCfg.GetKekInfos()) != 1 {
-			return fmt.Errorf("invalid Encrypt configuration, number of KekInfos is %v but expected 1 for 'no split' option", len(keyCfg.GetKekInfos()))
+			return nil, fmt.Errorf("invalid Encrypt configuration, number of KekInfos is %v but expected 1 for 'no split' option", len(keyCfg.GetKekInfos()))
 		}
 
 		shares = [][]byte{dataEncryptionKey[:]}
@@ -596,59 +604,63 @@ func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Wri
 
 		// The number of KEK Infos should match the number of shares to generate
 		if len(keyCfg.GetKekInfos()) != shamirShares {
-			return fmt.Errorf("invalid Encrypt configuration, number of KEK Infos does not match the number of shares to generate: found %v KEK Infos, %v shares", len(keyCfg.GetKekInfos()), shamirShares)
+			return nil, fmt.Errorf("invalid Encrypt configuration, number of KEK Infos does not match the number of shares to generate: found %v KEK Infos, %v shares", len(keyCfg.GetKekInfos()), shamirShares)
 		}
 
 		var err error
 		shares, err = SplitShares(dataEncryptionKey[:], shamirShares, shamirThreshold)
 		if err != nil {
-			return fmt.Errorf("error splitting encryption key: %v", err)
+			return nil, fmt.Errorf("error splitting encryption key: %v", err)
 		}
 
 	default:
-		return fmt.Errorf("unknown key splitting algorithm")
+		return nil, fmt.Errorf("unknown key splitting algorithm")
 	}
 
 	metadata.KeyConfig = keyCfg
 
 	var err error
-	metadata.Shares, err = c.wrapShares(ctx, shares, keyCfg.GetKekInfos(), keys)
+	var keyURIs []string
+	metadata.Shares, keyURIs, err = c.wrapShares(ctx, shares, keyCfg.GetKekInfos(), keys)
 	if err != nil {
-		return fmt.Errorf("error wrapping shares: %v", err)
+		return nil, fmt.Errorf("error wrapping shares: %v", err)
 	}
 
 	// Create AAD from metadata.
 	aad, err := metadataToAAD(metadata)
 	if err != nil {
-		return fmt.Errorf("error serializing metadata: %v", err)
+		return nil, fmt.Errorf("error serializing metadata: %v", err)
 	}
 
 	// Marshal the metadata into serialized bytes.
 	metadataBytes, err := proto.Marshal(metadata)
 	if err != nil {
-		return fmt.Errorf("failed to serialize metadata: %v", err)
+		return nil, fmt.Errorf("failed to serialize metadata: %v", err)
 	}
 
 	// Write the header and metadata to `output`.
 	if err := writeHeader(output, len(metadataBytes)); err != nil {
-		return fmt.Errorf("failed to write encrypted file header: %v", err)
+		return nil, fmt.Errorf("failed to write encrypted file header: %v", err)
 	}
 
 	if _, err := output.Write(metadataBytes); err != nil {
-		return fmt.Errorf("failed to write metadata: %v", err)
+		return nil, fmt.Errorf("failed to write metadata: %v", err)
 	}
 
 	// Pass `output` to the AEAD encryption function to write the ciphertext.
 	if err := aeadEncrypt(dataEncryptionKey, input, output, aad); err != nil {
-		return fmt.Errorf("error encrypting data: %v", err)
+		return nil, fmt.Errorf("error encrypting data: %v", err)
 	}
 
-	return nil
+	return &StetMetadata{
+		KeyUris: keyURIs,
+		BlobID:  metadata.GetBlobId(),
+	}, nil
 }
 
 // Decrypt writes the decrypted data to the `output` writer, and returns the
 // key URIs used during decryption and the blob ID decrypted.
-func (c *StetClient) Decrypt(ctx context.Context, input io.Reader, output io.Writer, config *configpb.DecryptConfig, keys *configpb.AsymmetricKeys) (*DecryptedMetadata, error) {
+func (c *StetClient) Decrypt(ctx context.Context, input io.Reader, output io.Writer, config *configpb.DecryptConfig, keys *configpb.AsymmetricKeys) (*StetMetadata, error) {
 	if config == nil {
 		return nil, fmt.Errorf("nil DecryptConfig passed to Decrypt()")
 	}
@@ -753,7 +765,7 @@ func (c *StetClient) Decrypt(ctx context.Context, input io.Reader, output io.Wri
 		}
 	}
 
-	return &DecryptedMetadata{
+	return &StetMetadata{
 		KeyUris: keyURIs,
 		BlobID:  metadata.GetBlobId(),
 	}, nil
