@@ -1108,6 +1108,8 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 	}
 }
 
+// Because unwrapAndValidateShares() tries unwrapping all shares and doesn't
+// fail early, 0 shares returned indicates an error occurred.
 func TestUnwrapAndValidateSharesError(t *testing.T) {
 	testUnwrappedShare := []byte("I am an unwrapped share")
 	testWrappedShare := &configpb.WrappedShare{
@@ -1143,9 +1145,8 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 					KekUri: "I am an invalid URI!",
 				},
 			}},
-			fakeSSClient:      &fakeSecureSessionClient{},
-			decryptErrReturn:  nil,
-			expectedErrSubstr: "retrieving KEK Metadata",
+			fakeSSClient:     &fakeSecureSessionClient{},
+			decryptErrReturn: nil,
 		},
 		{
 			name: "Unwrapped share has an invalid hash",
@@ -1158,9 +1159,8 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 					KekUri: testKEKURISoftware,
 				},
 			}},
-			fakeSSClient:      &fakeSecureSessionClient{},
-			decryptErrReturn:  nil,
-			expectedErrSubstr: "expected hash",
+			fakeSSClient:     &fakeSecureSessionClient{},
+			decryptErrReturn: nil,
 		},
 		{
 			name:          "ekmSecureSessionUnwrap with secure session returns error",
@@ -1174,7 +1174,6 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			fakeSSClient: &fakeSecureSessionClient{
 				unwrapErr: errors.New("this is an error from ConfidentialUnwrap"),
 			},
-			expectedErrSubstr: "unwrapping with external EKM",
 		},
 		{
 			name:          "unwrapKMSShare returns error",
@@ -1184,8 +1183,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 					KekUri: testKEKURISoftware,
 				},
 			}},
-			decryptErrReturn:  errors.New("service unavailable"),
-			expectedErrSubstr: "service unavailable",
+			decryptErrReturn: errors.New("service unavailable"),
 		},
 	}
 
@@ -1202,10 +1200,14 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			var stetClient StetClient
 			stetClient.setFakeKeyManagementClient(fakeKmsClient)
 			stetClient.setFakeSecureSessionClient(testCase.fakeSSClient)
-			_, err := stetClient.unwrapAndValidateShares(ctx, testCase.wrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
+			shares, err := stetClient.unwrapAndValidateShares(ctx, testCase.wrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
 
-			if err == nil {
+			if testCase.expectedErrSubstr != "" && err == nil {
 				t.Errorf("unwrapAndValidateShares(context.Background(), %s, %s) expected to return error, but did not", testCase.wrappedShares, testCase.kekInfos)
+			}
+
+			if len(shares) != 0 {
+				t.Errorf("unwrapAndValidateShares(context.Background(), %s, %s) got %v shares, but want 0", testCase.wrappedShares, testCase.kekInfos, len(shares))
 			}
 		})
 	}

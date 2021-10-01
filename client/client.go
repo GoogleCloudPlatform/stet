@@ -33,6 +33,7 @@ import (
 
 	"cloud.google.com/go/kms/apiv1"
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
+	glog "github.com/golang/glog"
 	"github.com/google/uuid"
 	"github.com/googleapis/gax-go"
 	rpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
@@ -472,8 +473,13 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 	// Gets populated once the first non-local key is seen.
 	var kekMetadatas []kekMetadata
 
+	// In order to support k-of-n decryption, don't exit early if share
+	// share unwrapping fails. Attempt to unwrap all shares and just
+	// return the subset of ones that succeeded, and let the Shamir's
+	// implementation handle the subset of shares.
 	var unwrappedShares []unwrappedShare
 	for i, wrapped := range wrappedShares {
+		glog.Infof("Attempting to unwrap share #%v", i+1)
 		unwrapped := unwrappedShare{}
 		kek := kekInfos[i]
 
@@ -481,18 +487,21 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 		case *configpb.KekInfo_RsaFingerprint:
 			key, err := privateKeyForRSAFingerprint(kek, keys)
 			if err != nil {
-				return nil, fmt.Errorf("failed to find public key for RSA fingerprint: %w", err)
+				glog.Warningf("Failed to find public key for RSA fingerprint: %v", err)
+				continue
 			}
 
 			unwrapped.share, err = rsa.DecryptOAEP(sha256.New(), rand.Reader, key, wrapped.GetShare(), nil)
 			if err != nil {
-				return nil, fmt.Errorf("error unwrapping key share: %v", err)
+				glog.Warningf("Error unwrapping key share: %v", err)
+				continue
 			}
 
 		case *configpb.KekInfo_KekUri:
 			// Instantiate `kmsClient` and populate `kekMetadatas` if not already done.
 			if err := c.initializeKMSClient(ctx); err != nil {
-				return nil, fmt.Errorf("error initializing KMS Client: %v", err)
+				glog.Warningf("Error initializing Cloud KMS Client: %v", err)
+				continue
 			}
 			defer c.kmsClient.Close()
 
@@ -500,7 +509,8 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 				var err error
 				kekMetadatas, err = protectionLevelsAndUris(ctx, c.kmsClient, kekInfos)
 				if err != nil {
-					return nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
+					glog.Warningf("Error retrieving KEK Metadata: %v", err)
+					continue
 				}
 			}
 
@@ -510,15 +520,18 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
 				unwrapped.share, err = unwrapKMSShare(ctx, c.kmsClient, wrapped.GetShare(), kekMetadatas[i].resourceName)
 				if err != nil {
-					return nil, fmt.Errorf("error unwrapping key share: %v", err)
+					glog.Warningf("Error unwrapping key share: %v", err)
+					continue
 				}
 			case rpb.ProtectionLevel_EXTERNAL:
 				unwrapped.share, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), kekMetadatas[i])
 				if err != nil {
-					return nil, fmt.Errorf("error unwrapping with external EKM for %v: %v", kekMetadatas[i].uri, err)
+					glog.Warningf("Error unwrapping with external EKM for %v: %v", kekMetadatas[i].uri, err)
+					continue
 				}
 			default:
-				return nil, fmt.Errorf("unsupported protection level %v", pl)
+				glog.Warningf("Unsupported protection level %v", pl)
+				continue
 			}
 
 			// Return the URI used: the Cloud KMS one in the case of a software
@@ -526,13 +539,16 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 			unwrapped.uri = kekMetadatas[i].uri
 
 		default:
-			return nil, fmt.Errorf("unsupported KekInfo type: %v", x)
+			glog.Warningf("Unsupported KekInfo type: %v", x)
+			continue
 		}
 
 		if !ValidateShare(unwrapped.share, wrapped.GetHash()) {
-			return nil, fmt.Errorf("unwrapped share %v does not have the expected hash", i)
+			glog.Warningf("Unwrapped share %v does not have the expected hash", i)
+			continue
 		}
 
+		glog.Infof("Successfully unwrapped share #%v", i+1)
 		unwrappedShares = append(unwrappedShares, unwrapped)
 	}
 
@@ -688,8 +704,11 @@ func (c *StetClient) Decrypt(ctx context.Context, input io.Reader, output io.Wri
 
 	// Reverse Shamir's Secret Sharing to reconstitute the whole DEK.
 	case *configpb.KeyConfig_Shamir:
-		var shares [][]byte
+		if len(unwrappedShares) < int(matchingKeyConfig.GetShamir().GetThreshold()) {
+			return nil, fmt.Errorf("only successfully unwrapped %v shares, which is fewer than threshold of %v", len(unwrappedShares), matchingKeyConfig.GetShamir().GetThreshold())
+		}
 
+		var shares [][]byte
 		for _, share := range unwrappedShares {
 			shares = append(shares, share.share)
 		}
