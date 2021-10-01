@@ -41,17 +41,18 @@ There are 3 components to a `key_config`:
 ### Split Trust
 
 If you would like to configure STET to use "split trust" and encrypt/decrypt
-with multiple KMS systems, a key-splitting algorithm and an appropriate number
-of `kek_info` objects for that algorithm must be provided.
+with multiple KMS systems or asymmetric keys, a key-splitting algorithm and an
+appropriate number of `kek_info` objects for that algorithm must be provided.
 
 The following key-splitting algorithms are currently supported:
 
 *   `no_split`: This algorithm does not split the trust. The key encryption key
-    used is wholly known by the single KMS being used.
-*   `shamir`: This algorithm splits the trust between a number of KMS systems
-    (specified by `shares`) during encryption. Decryption requires a minimum
-    number of those shares (specified by `threshold`) to be present. Currently,
-    the only supported value for `shares` and `threshold` is 2 for both fields.
+    used is wholly known by the single KMS or asymmetric key being used.
+*   `shamir`: This algorithm splits the trust between a number of KMS systems or
+    asymmetric keys (specified by `shares`) during encryption. Decryption
+    requires a minimum number of those shares (specified by `threshold`) to be
+    present. `shares` and `threshold` must both be greater than or equal to 2,
+    and `shares` must be greater or equal to `threshold`.
 
 ### Example
 
