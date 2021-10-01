@@ -248,6 +248,26 @@ $ some-process | stet encrypt - - | some-other-process
 $ some-process | stet decrypt - - | some-other-process
 ```
 
+### Validating blob IDs and key URIs
+
+When encrypting and decrypting data using STET, it is important to validate the
+blob ID and key URIs used. STET will output the blob ID stored in the metadata
+of the encrypted file, as well as the key URI of the key actually used (e.g. the
+specific external key URI when using an external key management system):
+
+```
+Blob ID of decrypted data: fa0fc0a8-b7b3-4ae2-bcc8-0aa862d1ff61
+Used these key URIs: [https://my-ekm.io/keys/12345]
+```
+
+Checking the key URI used during encryption prevents accidental or malicious
+misconfiguration resulting in the incorrect (with a potentially less restrictive
+decryption policy) encryption key.
+
+If the blob ID was set to a known value (e.g. the location of the file when
+uploaded to a bucket), ensuring a match at decryption time confirms that the
+data was not swapped out with another piece of data unknowingly.
+
 ## License
 
 STET is not an officially supported Google product.
