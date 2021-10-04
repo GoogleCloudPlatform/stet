@@ -175,13 +175,13 @@ func newSecureSessionClient(addr, authToken string, certPool *x509.CertPool) (*S
 
 	c.tls = tls.Client(c.shim, cfg)
 
-	// Kick off handshake and wait for a write from the TLS client.
+	// Kick off inner TLS session handshake and wait for a write.
 	go func() {
-		err := c.tls.Handshake()
-		if err != nil {
-			glog.Errorf("Goroutine handshake error: %v", err.Error())
+		if err := c.tls.Handshake(); err != nil {
+			glog.Errorf("Inner TLS handshake failed: %v", err.Error())
+			return
 		}
-		glog.Infof("TLS handshake inside goroutine complete")
+		glog.Infof("Inner TLS handshake succeeded")
 	}()
 
 	// Set state.
