@@ -29,12 +29,13 @@ import (
 )
 
 var (
-	addr         = flag.String("addr", fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath1), "Service address of server")
-	audience     = flag.String("audience", "bar", "Audience for the JWT generation")
-	authToken    = flag.String("auth_token", "", "Bearer JWT for RPC requests")
-	keyPath      = flag.String("key_path", server.KeyPath1, "The key path for wrapping/unwrapping")
-	plaintext    = flag.String("plaintext", "foobar", "The test plaintext to wrap and unwrap")
-	resourceName = flag.String("resource", server.KeyPath1, "The relative resource name of the key to wrap/unwrap")
+	addr          = flag.String("addr", fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath1), "Service address of server")
+	audience      = flag.String("audience", "bar", "Audience for the JWT generation")
+	authToken     = flag.String("auth_token", "", "Bearer JWT for RPC requests")
+	keyPath       = flag.String("key_path", server.KeyPath1, "The key path for wrapping/unwrapping")
+	plaintext     = flag.String("plaintext", "foobar", "The test plaintext to wrap and unwrap")
+	resourceName  = flag.String("resource", server.KeyPath1, "The relative resource name of the key to wrap/unwrap")
+	skipTLSVerify = flag.Bool("no-inner-tls-verify", false, "When true, skips server verification when establishing inner TLS connection")
 )
 
 func main() {
@@ -62,18 +63,30 @@ func main() {
 	}
 
 	glog.Infof("Attempting to connect to secure session server at %v.", *addr)
-	client, err := client.EstablishSecureSession(ctx, *addr, *authToken)
-	if err != nil {
-		glog.Exit(fmt.Sprintf("Error establishing secure session: %v", err.Error()))
+
+	var ssClient *client.SecureSessionClient
+	if *skipTLSVerify {
+		var err error
+		ssClient, err = client.EstablishSecureSessionWithoutTLSVerification(ctx, *addr, *authToken, nil)
+		if err != nil {
+			glog.Exit(fmt.Sprintf("Error establishing secure session (without TLS verification): %v", err.Error()))
+		}
+	} else {
+		var err error
+		ssClient, err = client.EstablishSecureSession(ctx, *addr, *authToken)
+		if err != nil {
+			glog.Exit(fmt.Sprintf("Error establishing secure session (with TLS verification): %v", err.Error()))
+		}
 	}
+
 	glog.Info("Established secure session")
 
-	wrappedBlob, err := client.ConfidentialWrap(ctx, *keyPath, *resourceName, []byte(*plaintext))
+	wrappedBlob, err := ssClient.ConfidentialWrap(ctx, *keyPath, *resourceName, []byte(*plaintext))
 	if err != nil {
 		glog.Exit(fmt.Sprintf("Error calling ConfidentialWrap: %v", err.Error()))
 	}
 
-	unwrapped, err := client.ConfidentialUnwrap(ctx, *keyPath, *resourceName, wrappedBlob)
+	unwrapped, err := ssClient.ConfidentialUnwrap(ctx, *keyPath, *resourceName, wrappedBlob)
 	if err != nil {
 		glog.Exit(fmt.Sprintf("Error calling ConfidentialUnwrap: %v", err.Error()))
 	}
@@ -86,7 +99,7 @@ func main() {
 
 	// Try ending the session explicitly, which confirms that the session
 	// was indeed established successfully from the server's perspective.
-	if err := client.EndSession(ctx); err != nil {
+	if err := ssClient.EndSession(ctx); err != nil {
 		glog.Exit(fmt.Sprintf("Error ending session: %v", err.Error()))
 	}
 

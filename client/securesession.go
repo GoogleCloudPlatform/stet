@@ -22,6 +22,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/url"
 	"syscall"
 
 	"cloud.google.com/go/compute/metadata"
@@ -115,11 +116,18 @@ func tryDeescalatePrivileges() error {
 // secure session, or an error if one of the steps in the handshaking flow
 // failed.
 func EstablishSecureSession(ctx context.Context, addr, authToken string) (*SecureSessionClient, error) {
-	return establishSecureSessionWithCertPool(ctx, addr, authToken, nil)
+	return establishSecureSessionWithHTTPCertPool(ctx, addr, authToken, nil, false)
 }
 
-func establishSecureSessionWithCertPool(ctx context.Context, addr, authToken string, certPool *x509.CertPool) (*SecureSessionClient, error) {
-	client, err := newSecureSessionClient(addr, authToken, certPool)
+// EstablishSecureSessionWithoutTLSVerification behaves identically to
+// EstablishSecureSession, but allows an explicitly-configured certPool for
+// the HTTPS connection and skips server verification for the inner TLS session.
+func EstablishSecureSessionWithoutTLSVerification(ctx context.Context, addr, authToken string, httpCertPool *x509.CertPool) (*SecureSessionClient, error) {
+	return establishSecureSessionWithHTTPCertPool(ctx, addr, authToken, httpCertPool, true)
+}
+
+func establishSecureSessionWithHTTPCertPool(ctx context.Context, addr, authToken string, httpCertPool *x509.CertPool, skipTLSVerify bool) (*SecureSessionClient, error) {
+	client, err := newSecureSessionClient(addr, authToken, httpCertPool, skipTLSVerify)
 
 	if err != nil {
 		return nil, fmt.Errorf("error creating a secure session client: %v", err)
@@ -152,25 +160,27 @@ func establishSecureSessionWithCertPool(ctx context.Context, addr, authToken str
 
 // newClient returns a new SecureSessionClient object that connects to a
 // secure session service at the given address.
-func newSecureSessionClient(addr, authToken string, certPool *x509.CertPool) (*SecureSessionClient, error) {
+func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool, skipTLSVerify bool) (*SecureSessionClient, error) {
 	c := &SecureSessionClient{}
 
-	c.client = confidentialEkmClient{uri: addr, authToken: authToken, certPool: certPool}
+	c.client = confidentialEkmClient{uri: addr, authToken: authToken, certPool: httpCertPool}
 	c.shim = transportshim.NewTransportShim()
 
-	// Set up the TLS client object.
-	roots := x509.NewCertPool()
-	ok := roots.AppendCertsFromPEM([]byte(constants.SrvTestCrt))
-	if !ok {
-		return nil, errors.New("failed to parse root certificate")
+	cfg := &tls.Config{
+		CipherSuites: constants.AllowableCipherSuites,
+		MinVersion:   tls.VersionTLS12,
+		MaxVersion:   tls.VersionTLS13,
 	}
 
-	cfg := &tls.Config{
-		CipherSuites:       constants.AllowableCipherSuites,
-		InsecureSkipVerify: true,
-		RootCAs:            roots,
-		MinVersion:         tls.VersionTLS12,
-		MaxVersion:         tls.VersionTLS13,
+	// If in testing mode, skip verification. Otherwise, set ServerName based on key URI.
+	if skipTLSVerify {
+		cfg.InsecureSkipVerify = true
+	} else {
+		u, err := url.Parse(addr)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse address for secure session client: %v", err)
+		}
+		cfg.ServerName = u.Hostname()
 	}
 
 	c.tls = tls.Client(c.shim, cfg)
