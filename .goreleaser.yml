@@ -1,0 +1,25 @@
+project_name: "stet"
+builds:
+  -
+    main: ./cmd/stet
+    id: "stet"
+    binary: stet
+    env:
+    - CGO_ENABLED=0
+    goos:
+    - linux
+    goarch:
+    - amd64
+archives:
+- replacements:
+    amd64: x86_64
+checksum:
+  name_template: 'checksums.txt'
+snapshot:
+  name_template: "{{ incpatch .Version }}-next"
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - '^docs:'
+      - '^test:'
