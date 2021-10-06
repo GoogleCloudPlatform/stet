@@ -34,10 +34,13 @@ import (
 const (
 	// The default name for the STET configuration file.
 	defaultConfigName string = "stet.yaml"
-
-	// The current version, displayed via the `version` subcommand.
-	stetVersion string = "0.0.0"
 )
+
+// These variables can be overridden by ldflags, as GoReleaser does when
+// publishing new releases, to provide more information about the build.
+var commit string
+var date string
+var version string
 
 // encryptCmd handles CLI options for the encryption command.
 type encryptCmd struct {
@@ -327,7 +330,11 @@ func (*versionCmd) Synopsis() string       { return "prints the current version"
 func (*versionCmd) Usage() string          { return "Usage: stet version" }
 func (*versionCmd) SetFlags(*flag.FlagSet) {}
 func (*versionCmd) Execute(context.Context, *flag.FlagSet, ...interface{}) subcommands.ExitStatus {
-	fmt.Printf("STET Version %s\n", stetVersion)
+	if version == "" {
+		fmt.Println("Version: development")
+	} else {
+		fmt.Printf("Version: %v (%v, build date: %v)\n", version, commit, date)
+	}
 	return subcommands.ExitSuccess
 }
 
