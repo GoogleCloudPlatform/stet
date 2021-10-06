@@ -1,7 +1,7 @@
 # STET Quickstart Guide
 
-For an introduction on how ubiquitous data encryptiona and split-trust work,
-read our
+For an introduction on how ubiquitous data encryption and split-trust work, read
+our
 [concept overview](https://cloud.google.com/compute/confidential-vm/docs/ubiquitous-data-encryption).
 
 ## Create and Configure a Service Account
