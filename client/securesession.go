@@ -269,6 +269,9 @@ func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
 	} else {
 		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_TPM2_QUOTE)
 		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_TCG_EVENT_LOG)
+
+		// Communicate to the server the nonce types that we support.
+		evidenceTypes.NonceTypes = append(evidenceTypes.NonceTypes, aepb.NonceType_NONCE_EKM32)
 	}
 
 	if err := tryDeescalatePrivileges(); err != nil {
@@ -339,15 +342,42 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 		}
 		defer ek.Close()
 
-		// Generate exported keying material and attestation.
-		tlsState := c.tls.ConnectionState()
-		material, err := tlsState.ExportKeyingMaterial(constants.ExportLabel, nil, 32)
-		if err != nil {
-			return fmt.Errorf("error exporting key material: %v", err)
+		// Resolve the most recent supported nonce type from the server's repsonse.
+		preferredNonceTypes := []aepb.NonceType{
+			aepb.NonceType_NONCE_EKM32,
 		}
 
-		nonce := []byte(constants.AttestationPrefix)
-		nonce = append(nonce, material...)
+		// Fallback to NONCE_EKM32 if the server responds with a 0-length list of
+		// nonce types (this implies server has not implemented negotiation).
+		negotiatedNonceType := aepb.NonceType_NONCE_EKM32
+
+	nonceLoop:
+		for _, nonceType := range preferredNonceTypes {
+			for _, serverNonceType := range c.attestationTypes.GetNonceTypes() {
+				if nonceType == serverNonceType {
+					negotiatedNonceType = nonceType
+					break nonceLoop
+				}
+			}
+		}
+
+		var nonce []byte
+
+		switch negotiatedNonceType {
+		case aepb.NonceType_NONCE_EKM32:
+			// Generate exported keying material and attestation.
+			tlsState := c.tls.ConnectionState()
+			material, err := tlsState.ExportKeyingMaterial(constants.ExportLabel, nil, 32)
+			if err != nil {
+				return fmt.Errorf("error exporting key material: %v", err)
+			}
+
+			nonce = append(nonce, []byte(constants.AttestationPrefix)...)
+			nonce = append(nonce, material...)
+		default:
+			return fmt.Errorf("negotiated unknown nonce type: %v", negotiatedNonceType)
+		}
+
 		att, err := ek.Attest(nonce, nil)
 
 		if err != nil {

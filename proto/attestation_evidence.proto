@@ -37,6 +37,16 @@ enum AttestationEvidenceType {
   TCG_EVENT_LOG = 3;     // AttestationEvidence.tcg_event_log
 }
 
+// The types of nonces that may be used to generate attestations. This exists to
+// allow for servers and clients to negotiate what nonces they understand to
+// facilitate a migration period for servers without breaking multi-EKM
+// connections from the same client.
+enum NonceType {
+  NONCE_TYPE_UNKNOWN = 0;
+  NONCE_EKM32 = 1;  // uses 32-byte exported keying material (EKM)
+}
+
 message AttestationEvidenceTypeList {
   repeated AttestationEvidenceType types = 1;
+  repeated NonceType nonce_types = 2;
 }
