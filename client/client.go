@@ -20,14 +20,10 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/pem"
 	"fmt"
 	"hash/crc32"
 	"io"
 	"net/url"
-	"os"
 	"path"
 	"strings"
 
@@ -196,46 +192,20 @@ func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []
 	return unwrappedBlob, nil
 }
 
-// Generates an JWT with the FQDN of the given address as its audience.
-func generateTokenFromEKMAddress(ctx context.Context, address string) (string, error) {
-	u, err := url.Parse(address)
-	if err != nil {
-		return "", fmt.Errorf("could not parse EKM address: %v", err)
-	}
-
-	audience := fmt.Sprintf("%v://%v", u.Scheme, u.Hostname())
-
-	var authToken string
-	if authToken, err = GenerateJWT(ctx, audience); err != nil {
-		return "", fmt.Errorf("failed to generate JWT: %v", err)
-	}
-
-	return authToken, nil
-}
-
-// Remove scheme from the EKM address URL to dial gRPC correctly.
-func removeSchemeFromURL(ekmURL string) (string, error) {
-	u, err := url.Parse(ekmURL)
-	if err != nil {
-		return "", fmt.Errorf("could not extract host from EKM address: %v", err)
-	}
-
-	return u.Host, nil
-}
-
 func crc32c(data []byte) uint32 {
 	t := crc32.MakeTable(crc32.Castagnoli)
 	return crc32.Checksum(data, t)
 }
 
-func wrapKMSShare(ctx context.Context, kmsClient cloudKMSClient, share []byte, keyName string) ([]byte, error) {
+// wrapKMSShare uses a KMS client to wrap the given share using Cloud KMS.
+func (c *StetClient) wrapKMSShare(ctx context.Context, share []byte, keyName string) ([]byte, error) {
 	req := &spb.EncryptRequest{
 		Name:            keyName,
 		Plaintext:       share,
 		PlaintextCrc32C: wrapperspb.Int64(int64(crc32c(share))),
 	}
 
-	result, err := kmsClient.Encrypt(ctx, req)
+	result, err := c.kmsClient.Encrypt(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to encrypt: %v", err)
 	}
@@ -256,7 +226,7 @@ type kekMetadata struct {
 }
 
 // protectionLevelsAndUris takes a list of KekInfos and queries Cloud KMS for the corresponding protection levels and URIs.
-func protectionLevelsAndUris(ctx context.Context, kmsClient cloudKMSClient, kekInfos []*configpb.KekInfo) ([]kekMetadata, error) {
+func (c *StetClient) protectionLevelsAndUris(ctx context.Context, kekInfos []*configpb.KekInfo) ([]kekMetadata, error) {
 	var kekMetadatas []kekMetadata
 	for _, kekInfo := range kekInfos {
 		kmd := kekMetadata{}
@@ -270,7 +240,7 @@ func protectionLevelsAndUris(ctx context.Context, kmsClient cloudKMSClient, kekI
 				return nil, fmt.Errorf("%v does not have the expected URI prefix, want %v", uri, gcpKeyPrefix)
 			}
 
-			cryptoKey, err := kmsClient.GetCryptoKey(ctx, &spb.GetCryptoKeyRequest{Name: strings.TrimPrefix(uri, gcpKeyPrefix)})
+			cryptoKey, err := c.kmsClient.GetCryptoKey(ctx, &spb.GetCryptoKeyRequest{Name: strings.TrimPrefix(uri, gcpKeyPrefix)})
 			if err != nil {
 				return nil, fmt.Errorf("error retrieving key metadata: %v", err)
 			}
@@ -304,39 +274,6 @@ func protectionLevelsAndUris(ctx context.Context, kmsClient cloudKMSClient, kekI
 	}
 
 	return kekMetadatas, nil
-}
-
-// Iterates through the public keys defined in `keys`, searching for one that
-// matches `kek`. If one is found, returns it, otherwise returns nil.
-func publicKeyForRSAFingerprint(kek *configpb.KekInfo, keys *configpb.AsymmetricKeys) (*rsa.PublicKey, error) {
-	for _, path := range keys.GetPublicKeyFiles() {
-		keyBytes, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open public key file: %w", err)
-		}
-
-		block, _ := pem.Decode(keyBytes)
-		if block == nil || block.Type != "PUBLIC KEY" {
-			return nil, fmt.Errorf("failed to decode PEM block containing public key")
-		}
-
-		pub, err := x509.ParsePKIXPublicKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse public key from PEM: %v", err)
-		}
-		key, ok := pub.(*rsa.PublicKey)
-		if !ok {
-			return nil, fmt.Errorf("failed to parse RSA public key: %v", err)
-		}
-		// Compute SHA-256 digest of the DER-encoded public key.
-		sha := sha256.Sum256(block.Bytes)
-		fingerprint := base64.StdEncoding.EncodeToString(sha[:])
-		if fingerprint == kek.GetRsaFingerprint() {
-			return key, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no RSA public key found for fingerprint: %s", kek.GetRsaFingerprint())
 }
 
 // wrapShares encrypts the given shares using either the given key URIs or the
@@ -380,7 +317,7 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 
 			if kekMetadatas == nil {
 				var err error
-				kekMetadatas, err = protectionLevelsAndUris(ctx, c.kmsClient, kekInfos)
+				kekMetadatas, err = c.protectionLevelsAndUris(ctx, kekInfos)
 				if err != nil {
 					return nil, nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
 				}
@@ -390,7 +327,7 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 			switch pl := kekMetadatas[i].protectionLevel; pl {
 			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
 				var err error
-				wrapped.Share, err = wrapKMSShare(ctx, c.kmsClient, share, kekMetadatas[i].resourceName)
+				wrapped.Share, err = c.wrapKMSShare(ctx, share, kekMetadatas[i].resourceName)
 				if err != nil {
 					return nil, nil, fmt.Errorf("error wrapping key share: %v", err)
 				}
@@ -419,15 +356,15 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 	return wrappedShares, keyURIs, nil
 }
 
-func unwrapKMSShare(ctx context.Context, kmsClient cloudKMSClient, wrappedShare []byte, keyName string) ([]byte, error) {
-
+// unwrapKMSShare uses a KMS client to unwrap the given share using Cloud KMS.
+func (c *StetClient) unwrapKMSShare(ctx context.Context, wrappedShare []byte, keyName string) ([]byte, error) {
 	req := &spb.DecryptRequest{
 		Name:             keyName,
 		Ciphertext:       wrappedShare,
 		CiphertextCrc32C: wrapperspb.Int64(int64(crc32c(wrappedShare))),
 	}
 
-	result, err := kmsClient.Decrypt(ctx, req)
+	result, err := c.kmsClient.Decrypt(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("failed to decrypt ciphertext: %v", err)
 	}
@@ -436,40 +373,6 @@ func unwrapKMSShare(ctx context.Context, kmsClient cloudKMSClient, wrappedShare 
 		return nil, fmt.Errorf("Decrypt: response corrupted in-transit")
 	}
 	return result.Plaintext, nil
-}
-
-// Iterates through the private keys defined in `keys`, searching for one that
-// matches `kek`. If one is found, returns it, otherwise returns nil.
-func privateKeyForRSAFingerprint(kek *configpb.KekInfo, keys *configpb.AsymmetricKeys) (*rsa.PrivateKey, error) {
-	for _, path := range keys.GetPrivateKeyFiles() {
-		keyBytes, err := os.ReadFile(path)
-		if err != nil {
-			return nil, fmt.Errorf("failed to open private key file: %w", err)
-		}
-
-		block, _ := pem.Decode(keyBytes)
-		if block == nil || block.Type != "RSA PRIVATE KEY" {
-			return nil, fmt.Errorf("failed to decode PEM block containing RSA private key")
-		}
-
-		key, err := x509.ParsePKCS1PrivateKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse PKCS1 private key from PEM: %v", err)
-		}
-
-		// Compute SHA-256 digest of the DER-encoded public key.
-		der, err := x509.MarshalPKIXPublicKey(&key.PublicKey)
-		if err != nil {
-			return nil, fmt.Errorf("failed to marshal public key from private key: %w", err)
-		}
-		sha := sha256.Sum256(der)
-		fingerprint := base64.StdEncoding.EncodeToString(sha[:])
-		if fingerprint == kek.GetRsaFingerprint() {
-			return key, nil
-		}
-	}
-
-	return nil, fmt.Errorf("no RSA private key found for fingerprint: %s", kek.GetRsaFingerprint())
 }
 
 // unwrapAndValidateShares decrypts the given wrapped share based on its URI.
@@ -515,7 +418,7 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 
 			if kekMetadatas == nil {
 				var err error
-				kekMetadatas, err = protectionLevelsAndUris(ctx, c.kmsClient, kekInfos)
+				kekMetadatas, err = c.protectionLevelsAndUris(ctx, kekInfos)
 				if err != nil {
 					glog.Warningf("Error retrieving KEK Metadata: %v", err)
 					continue
@@ -526,7 +429,7 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 			var err error
 			switch pl := kekMetadatas[i].protectionLevel; pl {
 			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
-				unwrapped.share, err = unwrapKMSShare(ctx, c.kmsClient, wrapped.GetShare(), kekMetadatas[i].resourceName)
+				unwrapped.share, err = c.unwrapKMSShare(ctx, wrapped.GetShare(), kekMetadatas[i].resourceName)
 				if err != nil {
 					glog.Warningf("Error unwrapping key share: %v", err)
 					continue

@@ -26,6 +26,7 @@ go_library(
         "confidentialekmclient.go",
         "dek.go",
         "encryptedfile.go",
+        "fingerprint.go",
         "jwt.go",
         "metadata.go",
         "securesession.go",

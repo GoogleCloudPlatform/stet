@@ -250,7 +250,7 @@ func TestProtectionLevelsAndUris(t *testing.T) {
 
 	protectionLevels := []kmsrpb.ProtectionLevel{kmsrpb.ProtectionLevel_HSM, kmsrpb.ProtectionLevel_SOFTWARE, kmsrpb.ProtectionLevel_EXTERNAL, kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED}
 	plIndex := 0
-	fakeKmsClient := &fakeKeyManagementClient{
+	fakeKMSClient := &fakeKeyManagementClient{
 		getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 			ck := createEnabledCryptoKey(protectionLevels[plIndex])
 			plIndex++
@@ -258,14 +258,16 @@ func TestProtectionLevelsAndUris(t *testing.T) {
 		},
 	}
 
-	kekMetadatas, err := protectionLevelsAndUris(ctx, fakeKmsClient, kekInfos)
+	c := StetClient{kmsClient: fakeKMSClient}
+	kekMetadatas, err := c.protectionLevelsAndUris(ctx, kekInfos)
+
 	if err != nil {
-		t.Fatalf("protectionLevelsAndUris(ctx, %v, %v) returned with error %v", fakeKmsClient, kekInfos, err)
+		t.Fatalf("protectionLevelsAndUris(ctx, %v) returned with error %v", kekInfos, err)
 	}
 
 	for i, kmd := range kekMetadatas {
 		if kmd.uri != expectedURIs[i] {
-			t.Errorf("protectionLevelsAndUris(ctx, %v, %v) did not return the expected URI. Got %v, want %v", fakeKmsClient, kekInfos, kmd.uri, expectedURIs[i])
+			t.Errorf("protectionLevelsAndUris(ctx, %v) did not return the expected URI. Got %v, want %v", kekInfos, kmd.uri, expectedURIs[i])
 		}
 	}
 }
@@ -354,10 +356,11 @@ func TestProtectionLevelsAndUrisErrors(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := protectionLevelsAndUris(ctx, testCase.fakeKmsClient, testCase.kekInfos)
+			c := StetClient{kmsClient: testCase.fakeKmsClient}
+			_, err := c.protectionLevelsAndUris(ctx, testCase.kekInfos)
 
 			if err == nil {
-				t.Errorf("protectionLevelsAndUris(ctx, %v, %v) returned no error, expected error related to \"%s\"", testCase.fakeKmsClient, testCase.kekInfos, testCase.expectedErrSubstr)
+				t.Errorf("protectionLevelsAndUris(ctx, %v) returned no error, expected error related to \"%s\"", testCase.kekInfos, testCase.expectedErrSubstr)
 			}
 		})
 	}
@@ -383,10 +386,11 @@ func TestWrapKMSShareSucceeds(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	kmsClient := &fakeKeyManagementClient{}
+	fakeKMSClient := &fakeKeyManagementClient{}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			wrappedShare, err := wrapKMSShare(ctx, kmsClient, testShare, testCase.kekName)
+			c := StetClient{kmsClient: fakeKMSClient}
+			wrappedShare, err := c.wrapKMSShare(ctx, testShare, testCase.kekName)
 			if err != nil {
 				t.Fatalf("wrapKMSShare(%v, %v) = %v error, want nil error", testShare, testCase.kekName, err)
 			}
@@ -435,13 +439,14 @@ func TestWrapKMSShareFails(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			kmsClient := &fakeKeyManagementClient{
+			fakeKMSClient := &fakeKeyManagementClient{
 				encryptFunc: func(_ context.Context, _ *kmsspb.EncryptRequest, _ ...gax.CallOption) (*kmsspb.EncryptResponse, error) {
 					return testCase.encryptResponse, testCase.encryptError
 				},
 			}
 
-			_, err := wrapKMSShare(ctx, kmsClient, plaintext, testKEKName)
+			c := StetClient{kmsClient: fakeKMSClient}
+			_, err := c.wrapKMSShare(ctx, plaintext, testKEKName)
 
 			if err == nil {
 				t.Errorf("wrapKMSShare(%v, %v) = nil error, want error", plaintext, testKEKName)
@@ -1600,16 +1605,17 @@ func TestUnwrapKMSShareSucceeds(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	kmsClient := &fakeKeyManagementClient{}
+	fakeKMSClient := &fakeKeyManagementClient{}
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			wrappedShare := fakeKMSWrap(expectedShare, testCase.kekName)
-			unwrappedShare, err := unwrapKMSShare(ctx, kmsClient, wrappedShare, testCase.kekName)
+			c := StetClient{kmsClient: fakeKMSClient}
+			unwrappedShare, err := c.unwrapKMSShare(ctx, wrappedShare, testCase.kekName)
 			if err != nil {
-				t.Fatalf("unwrapKMSShare(ctx, kmsClient, %v, %v) = %v error, want nil error", wrappedShare, testCase.kekName, err)
+				t.Fatalf("unwrapKMSShare(ctx, %v, %v) = %v error, want nil error", wrappedShare, testCase.kekName, err)
 			}
 			if !bytes.Equal(unwrappedShare, expectedShare) {
-				t.Errorf("unwrapKMSShare(ctx, kmsClient, %v, %v) = %v, want %v", wrappedShare, testCase.kekName, unwrappedShare, expectedShare)
+				t.Errorf("unwrapKMSShare(ctx, %v, %v) = %v, want %v", wrappedShare, testCase.kekName, unwrappedShare, expectedShare)
 			}
 		})
 	}
@@ -1641,16 +1647,17 @@ func TestUnwrapKMSShareFails(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			kmsClient := &fakeKeyManagementClient{
+			fakeKMSClient := &fakeKeyManagementClient{
 				decryptFunc: func(_ context.Context, _ *kmsspb.DecryptRequest, _ ...gax.CallOption) (*kmsspb.DecryptResponse, error) {
 					return testCase.decryptResponse, testCase.decryptError
 				},
 			}
 
-			_, err := unwrapKMSShare(ctx, kmsClient, plaintext, testKEKName)
+			c := StetClient{kmsClient: fakeKMSClient}
+			_, err := c.unwrapKMSShare(ctx, plaintext, testKEKName)
 
 			if err == nil {
-				t.Errorf("unwrapKMSShare(ctx, kmsClient, %v, %v) = nil error, want error", plaintext, testKEKName)
+				t.Errorf("unwrapKMSShare(ctx, %v, %v) = nil error, want error", plaintext, testKEKName)
 			}
 		})
 	}
@@ -1774,8 +1781,8 @@ func TestDecryptErrors(t *testing.T) {
 			return createEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
 		},
 	}
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKMSClient)
+
+	stetClient := StetClient{kmsClient: fakeKMSClient}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

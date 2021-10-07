@@ -19,6 +19,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
 
 	"cloud.google.com/go/compute/metadata"
@@ -41,6 +42,23 @@ func instanceIdentityToken(audience string) (string, error) {
 	// The metadata package doesn't have a convenient getter method to grab
 	// the instance identity token, so format the URL manually and use .Get().
 	return metadata.Get(fmt.Sprintf(instanceIdentityURL, audience))
+}
+
+// Generates an JWT with the FQDN of the given address as its audience.
+func generateTokenFromEKMAddress(ctx context.Context, address string) (string, error) {
+	u, err := url.Parse(address)
+	if err != nil {
+		return "", fmt.Errorf("could not parse EKM address: %v", err)
+	}
+
+	audience := fmt.Sprintf("%v://%v", u.Scheme, u.Hostname())
+
+	var authToken string
+	if authToken, err = GenerateJWT(ctx, audience); err != nil {
+		return "", fmt.Errorf("failed to generate JWT: %v", err)
+	}
+
+	return authToken, nil
 }
 
 // GenerateJWT returns a signed JWT derived from a Google service account.
