@@ -754,14 +754,11 @@ func (c *StetClient) Decrypt(ctx context.Context, input io.Reader, output io.Wri
 		return nil, fmt.Errorf("error decrypting data: %v", err)
 	}
 
-	// Extract key URIs from KeyConfigs.
+	// Return URIs of keys used during decryption.
 	var keyURIs []string
-	for _, kcfg := range config.GetKeyConfigs() {
-		for i, uri := range kcfg.GetKekInfos() {
-			switch uri.GetKekType().(type) {
-			case *configpb.KekInfo_KekUri:
-				keyURIs = append(keyURIs, unwrappedShares[i].uri)
-			}
+	for _, unwrapped := range unwrappedShares {
+		if unwrapped.uri != "" {
+			keyURIs = append(keyURIs, unwrapped.uri)
 		}
 	}
 
