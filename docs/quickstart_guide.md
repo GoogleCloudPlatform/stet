@@ -20,14 +20,12 @@ Cloud KMS/EKM.
     account creation, add the following roles:
     *   **Service Account Token Creator**
         *   This is needed so that the service account can generate OIDC tokens
-            required to authenticate with CCKM.
-    *   **Cloud KMS Admin**
+            required to authenticate with EKMs.
+    *   **Cloud KMS Viewer**
         *   This is needed to query Cloud KMS for
-            [key metadata](https://cloud.google.com/kms/docs/reference/permissions-and-roles")
+            [key metadata](https://cloud.google.com/kms/docs/reference/permissions-and-roles)
             which applies to both keys stored in Cloud KMS and also external
             keys.
-            *   Note: The Cloud KMS Admin role is used to grant the
-                [cloudkms.cryptoKeys.get permission](https://cloud.google.com/kms/docs/reference/permissions-and-roles#predefined).
     *   **Cloud KMS CryptoKey Encrypter/Decrypter**
         *   This is needed so that the service account can use keys stored in
             Cloud KMS to
