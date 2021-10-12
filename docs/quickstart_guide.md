@@ -18,6 +18,7 @@ Cloud KMS/EKM.
     [IAM console](https://console.cloud.google.com/iam-admin/serviceaccounts).
     In the *"Grant this service account access to project"* step of service
     account creation, add the following roles:
+
     *   **Service Account Token Creator**
         *   This is needed so that the service account can generate OIDC tokens
             required to authenticate with EKMs.
@@ -32,6 +33,22 @@ Cloud KMS/EKM.
             [encrypt/decrypt data](https://cloud.google.com/kms/docs/reference/permissions-and-roles)
             *   Note: this is not necessary if shares are not going to be
                 wrapped using Cloud KMS keys.
+
+    If you prefer using the [`gcloud` tool](https://cloud.google.com/sdk/gcloud)
+    instead, the following commands can be run to add the above roles:
+
+    ```bash
+    $ PROJECT="my-project"
+    $ SERVICE_ACCOUNT="my-sa@my-project.iam.gserviceaccount.com"
+
+    $ gcloud projects add-iam-policy-binding $PROJECT \
+      --member serviceAccount:${SERVICE_ACCOUNT} --role roles/iam.serviceAccountTokenCreator
+    $ gcloud projects add-iam-policy-binding $PROJECT \
+      --member serviceAccount:${SERVICE_ACCOUNT} --role roles/cloudkms.viewer
+    $ gcloud projects add-iam-policy-binding $PROJECT \
+      --member serviceAccount:${SERVICE_ACCOUNT} --role roles/cloudkms.cryptoKeyDecrypter
+    ```
+
 3.  Note down the member name of the service account that you created (**you
     will need this later**).
 
