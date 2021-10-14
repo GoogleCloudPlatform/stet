@@ -48,6 +48,21 @@ and `go build` commands), or via [Bazel](https://bazel.build/).
     $ sudo chmod u+sx,a+rx /usr/local/bin/stet
     ```
 
+### Prebuilt Binaries
+
+Alternatively, prebuilt binaries are automatically compiled and bundled with
+releases of STET, which can be found on the
+[Releases page](https://github.com/GoogleCloudPlatform/stet/releases). As with
+the above instructions, the binary should be copied to an executable location
+and granted `suid`positions as well:
+
+```bash
+$ tar -zxf stet_1.0.0_linux_x86_64.tar.gz
+$ sudo mv stet /usr/local/bin
+$ sudo chown root /usr/local/bin/stet
+$ sudo chmod u+sx,a+rx /usr/local/bin/stet
+```
+
 ## Using STET
 
 ### Create configuration
@@ -267,6 +282,24 @@ decryption policy) encryption key.
 If the blob ID was set to a known value (e.g. the location of the file when
 uploaded to a bucket), ensuring a match at decryption time confirms that the
 data was not swapped out with another piece of data unknowingly.
+
+### `gsutil` integration
+
+STET is also integrated with
+[`gsutil`](https://github.com/GoogleCloudPlatform/gsutil) 5.0 and higher.
+Instead of invoking STET manually, if `gsutil` can find STET in your `$PATH` and
+the `--stet` flag is passed, file uploads will be encrypted via STET (and the
+blob ID is set to the final upload location), and file downloads will be
+decrypted via STET before being written to disk.
+
+```bash
+$ gsutil cp --stet secrets.txt "gs://my-bucket/my-secrets"
+$ gsutil cp --stet "gs://my-bucket/my-secrets" plaintext.txt
+```
+
+The `stet_binary_path` and `stet_config_path` variables can be set in your
+[boto configuration file](https://cloud.google.com/storage/docs/boto-gsutil) to
+override the default path and config file lookups.
 
 ### Further Reading
 
