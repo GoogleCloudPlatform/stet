@@ -12,7 +12,7 @@ require (
         github.com/google/tink/go v1.6.1
         github.com/google/uuid v1.2.0
         github.com/googleapis/gax-go v1.0.3
-        github.com/hashicorp/vault v1.7.3
+        github.com/hashicorp/vault v1.7.5
         golang.org/x/net v0.0.0-20210716203947-853a461950ff // indirect
         golang.org/x/oauth2 v0.0.0-20200902213428-5d25da1a8d43
         golang.org/x/sys v0.0.0-20210630005230-0f9fa26af87c // indirect
