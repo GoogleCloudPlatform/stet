@@ -32,6 +32,7 @@ import (
 	glog "github.com/golang/glog"
 	"github.com/google/uuid"
 	"github.com/googleapis/gax-go"
+	"google.golang.org/api/option"
 	rpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	spb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	"google.golang.org/protobuf/proto"
@@ -78,6 +79,15 @@ type StetClient struct {
 
 	// Fake Secure Session Client for testing purposes.
 	fakeSecureSessionClient secureSessionClient
+
+	// The version of STET, if set.
+	version string
+}
+
+// SetVersion sets the version field of the StetClient to `version`.
+// Version info is used to construct user agent strings for requests.
+func (c *StetClient) SetVersion(version string) {
+	c.version = version
 }
 
 // initializeKMSClient initializes the StetClient's `kmsClient`.
@@ -93,7 +103,16 @@ func (c *StetClient) initializeKMSClient(ctx context.Context) error {
 		c.kmsClient = c.fakeKeyManagementClient
 	} else {
 		var err error
-		c.kmsClient, err = kms.NewKeyManagementClient(ctx)
+
+		// Set user agent for Cloud KMS API calls.
+		ua := "STET/"
+		if c.version != "" {
+			ua += c.version
+		} else {
+			ua += "dev"
+		}
+
+		c.kmsClient, err = kms.NewKeyManagementClient(ctx, option.WithUserAgent(ua))
 		if err != nil {
 			return fmt.Errorf("error creating KMS client: %v", err)
 		}

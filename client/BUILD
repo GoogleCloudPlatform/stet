@@ -56,6 +56,7 @@ go_library(
         "@com_google_cloud_go//kms/apiv1:go_default_library",
         "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
         "@go_googleapis//google/iam/credentials/v1:credentials_go_proto",
+        "@org_golang_google_api//option:go_default_library",
         "@org_golang_google_protobuf//encoding/protojson",
         "@org_golang_google_protobuf//proto",
         "@org_golang_google_protobuf//types/known/wrapperspb",

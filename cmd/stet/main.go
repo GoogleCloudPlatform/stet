@@ -137,6 +137,9 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 
 	// Initialize StetClient and encrypt plaintext.
 	c := client.StetClient{}
+	if version != "" {
+		c.SetVersion(version)
+	}
 
 	var outFile *os.File
 	var logFile *os.File
@@ -271,6 +274,9 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 
 	// Initialize StetClient and decrypt plaintext.
 	c := client.StetClient{}
+	if version != "" {
+		c.SetVersion(version)
+	}
 
 	var inFile io.Reader
 
