@@ -195,8 +195,12 @@ go_repository(
 go_repository(
     name = "com_github_google_go_tpm_tools",
     importpath = "github.com/google/go-tpm-tools",
-    commit = "0e0a98fb328ee3449247002a09e46249d38c65af",
-    patches = ["patches/go-tpm-tools/BUILD.patch"],
+    sum = "h1:AFlmenDrIe0WU5AvpbfGFOLprTJTg/fCwmTyFdDEjbM=",
+    version = "v0.3.1",
+    patches = [
+        "patches/go-tpm-tools/BUILD.patch",
+        "patches/go-tpm-tools/attest.proto.patch",
+    ],
 )
 
 # Needed for com_github_google_go_tpm_tools.

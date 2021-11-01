@@ -7,7 +7,7 @@ require (
         github.com/golang/glog v0.0.0-20160126235308-23def4e6c14b
         github.com/golang/protobuf v1.5.2 // indirect
         github.com/google/go-tpm v0.3.2
-        github.com/google/go-tpm-tools v0.3.0-alpha7.0.20210713195348-f73068111dae
+        github.com/google/go-tpm-tools v0.3.1
         github.com/google/subcommands v1.2.0
         github.com/google/tink/go v1.6.1
         github.com/google/uuid v1.2.0

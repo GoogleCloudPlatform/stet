@@ -378,7 +378,7 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 			return fmt.Errorf("negotiated unknown nonce type: %v", negotiatedNonceType)
 		}
 
-		att, err := ek.Attest(nonce, nil)
+		att, err := ek.Attest(tpmclient.AttestOpts{Nonce: nonce})
 
 		if err != nil {
 			return fmt.Errorf("error generating attestation: %v", err)
