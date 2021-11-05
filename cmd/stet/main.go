@@ -44,9 +44,10 @@ var version string
 
 // encryptCmd handles CLI options for the encryption command.
 type encryptCmd struct {
-	configFile string
-	blobID     string
-	quiet      bool
+	configFile         string
+	blobID             string
+	insecureSkipVerify bool
+	quiet              bool
 }
 
 func (*encryptCmd) Name() string { return "encrypt" }
@@ -90,6 +91,7 @@ func (e *encryptCmd) SetFlags(f *flag.FlagSet) {
 	configFilePath := fmt.Sprintf("%s/%s", cfgDir, defaultConfigName)
 	f.StringVar(&e.configFile, "config-file", configFilePath, "Path to a StetConfig YAML file. Optional.")
 	f.StringVar(&e.blobID, "blob-id", "", "The blob ID to assign to the encrypted blob. Optional.")
+	f.BoolVar(&e.insecureSkipVerify, "insecure-skip-verify", false, "Disable certificate check for inner TLS session.")
 	f.BoolVar(&e.quiet, "quiet", false, "Suppress logging output.")
 }
 
@@ -136,9 +138,9 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 	}
 
 	// Initialize StetClient and encrypt plaintext.
-	c := client.StetClient{}
-	if version != "" {
-		c.SetVersion(version)
+	c := client.StetClient{
+		InsecureSkipVerify: e.insecureSkipVerify,
+		Version:            version,
 	}
 
 	var outFile *os.File
@@ -180,9 +182,10 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 
 // decryptCmd handles CLI options for the decryption command.
 type decryptCmd struct {
-	configFile string
-	blobID     string
-	quiet      bool
+	configFile         string
+	blobID             string
+	insecureSkipVerify bool
+	quiet              bool
 }
 
 func (*decryptCmd) Name() string { return "decrypt" }
@@ -240,6 +243,7 @@ func (d *decryptCmd) SetFlags(f *flag.FlagSet) {
 	configFilePath := fmt.Sprintf("%s/%s", cfgDir, defaultConfigName)
 	f.StringVar(&d.configFile, "config-file", configFilePath, "Path to a StetConfig YAML file. Optional.")
 	f.StringVar(&d.blobID, "blob-id", "", "The blob ID to validate the decryption against. Optional.")
+	f.BoolVar(&d.insecureSkipVerify, "insecure-skip-verify", false, "Disable certificate check for inner TLS session.")
 	f.BoolVar(&d.quiet, "quiet", false, "Suppress logging output.")
 }
 
@@ -273,9 +277,9 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 	}
 
 	// Initialize StetClient and decrypt plaintext.
-	c := client.StetClient{}
-	if version != "" {
-		c.SetVersion(version)
+	c := client.StetClient{
+		InsecureSkipVerify: d.insecureSkipVerify,
+		Version:            version,
 	}
 
 	var inFile io.Reader

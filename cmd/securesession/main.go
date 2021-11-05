@@ -64,19 +64,9 @@ func main() {
 
 	glog.Infof("Attempting to connect to secure session server at %v.", *addr)
 
-	var ssClient *client.SecureSessionClient
-	if *skipTLSVerify {
-		var err error
-		ssClient, err = client.EstablishSecureSessionWithoutTLSVerification(ctx, *addr, *authToken, nil)
-		if err != nil {
-			glog.Exit(fmt.Sprintf("Error establishing secure session (without TLS verification): %v", err.Error()))
-		}
-	} else {
-		var err error
-		ssClient, err = client.EstablishSecureSession(ctx, *addr, *authToken)
-		if err != nil {
-			glog.Exit(fmt.Sprintf("Error establishing secure session (with TLS verification): %v", err.Error()))
-		}
+	ssClient, err := client.EstablishSecureSession(ctx, *addr, *authToken, client.SkipTLSVerify(*skipTLSVerify))
+	if err != nil {
+		glog.Exit(fmt.Sprintf("Error establishing secure session: %v", err.Error()))
 	}
 
 	glog.Info("Established secure session")

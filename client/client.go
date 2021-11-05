@@ -80,14 +80,12 @@ type StetClient struct {
 	// Fake Secure Session Client for testing purposes.
 	fakeSecureSessionClient secureSessionClient
 
-	// The version of STET, if set.
-	version string
-}
+	// Whether to skip verification of the inner TLS session cert.
+	InsecureSkipVerify bool
 
-// SetVersion sets the version field of the StetClient to `version`.
-// Version info is used to construct user agent strings for requests.
-func (c *StetClient) SetVersion(version string) {
-	c.version = version
+	// The version of STET, if set. This is used to construct user agent
+	// strings for Cloud KMS requests.
+	Version string
 }
 
 // initializeKMSClient initializes the StetClient's `kmsClient`.
@@ -106,8 +104,8 @@ func (c *StetClient) initializeKMSClient(ctx context.Context) error {
 
 		// Set user agent for Cloud KMS API calls.
 		ua := "STET/"
-		if c.version != "" {
-			ua += c.version
+		if c.Version != "" {
+			ua += c.Version
 		} else {
 			ua += "dev"
 		}
@@ -159,7 +157,7 @@ func (c *StetClient) ekmSecureSessionWrap(ctx context.Context, unwrappedShare []
 			return nil, err
 		}
 
-		ekmClient, err = EstablishSecureSession(ctx, md.uri, authToken)
+		ekmClient, err = EstablishSecureSession(ctx, md.uri, authToken, SkipTLSVerify(c.InsecureSkipVerify))
 		if err != nil {
 			return nil, fmt.Errorf("error establishing secure session: %v", err)
 		}
@@ -193,7 +191,7 @@ func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []
 			return nil, err
 		}
 
-		ekmClient, err = EstablishSecureSession(ctx, md.uri, authToken)
+		ekmClient, err = EstablishSecureSession(ctx, md.uri, authToken, SkipTLSVerify(c.InsecureSkipVerify))
 		if err != nil {
 			return nil, fmt.Errorf("error establishing secure session: %v", err)
 		}

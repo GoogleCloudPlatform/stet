@@ -111,23 +111,52 @@ func tryDeescalatePrivileges() error {
 	return nil
 }
 
+type secureSessionOptions struct {
+	httpCertPool  *x509.CertPool
+	skipTLSVerify bool
+}
+
+// SecureSessionOption configures EstablishSecureSession.
+type SecureSessionOption func(*secureSessionOptions)
+
+// HTTPCertPool sets an explicitly-configured x509.CertPool for the HTTPS
+// connection. Passing this option again will overwrite earlier values.
+func HTTPCertPool(pool *x509.CertPool) SecureSessionOption {
+	return func(opts *secureSessionOptions) {
+		opts.httpCertPool = pool
+	}
+}
+
+// SkipTLSVerify specifies whether the inner TLS session's certificate should
+// be validated. Passing this option again will overwrite earlier values.
+func SkipTLSVerify(skipTLSVerify bool) SecureSessionOption {
+	return func(opts *secureSessionOptions) {
+		opts.skipTLSVerify = skipTLSVerify
+	}
+}
+
+// DefaultSecureSessionOptions control the default values before
+// applying options passed to EstablishSecureSession.
+var DefaultSecureSessionOptions = []SecureSessionOption{
+	HTTPCertPool(nil),
+	SkipTLSVerify(false),
+}
+
 // EstablishSecureSession takes in a service address and performs the
 // handshaking flow, returning a Client object with the fully-established
-// secure session, or an error if one of the steps in the handshaking flow
-// failed.
-func EstablishSecureSession(ctx context.Context, addr, authToken string) (*SecureSessionClient, error) {
-	return establishSecureSessionWithHTTPCertPool(ctx, addr, authToken, nil, false)
-}
+// secure session, or an error if one of the steps in the handshake failed.
+func EstablishSecureSession(ctx context.Context, addr, authToken string, opts ...SecureSessionOption) (*SecureSessionClient, error) {
+	// Process variadic options.
+	var options secureSessionOptions
+	for _, opt := range DefaultSecureSessionOptions {
+		opt(&options)
+	}
 
-// EstablishSecureSessionWithoutTLSVerification behaves identically to
-// EstablishSecureSession, but allows an explicitly-configured certPool for
-// the HTTPS connection and skips server verification for the inner TLS session.
-func EstablishSecureSessionWithoutTLSVerification(ctx context.Context, addr, authToken string, httpCertPool *x509.CertPool) (*SecureSessionClient, error) {
-	return establishSecureSessionWithHTTPCertPool(ctx, addr, authToken, httpCertPool, true)
-}
+	for _, opt := range opts {
+		opt(&options)
+	}
 
-func establishSecureSessionWithHTTPCertPool(ctx context.Context, addr, authToken string, httpCertPool *x509.CertPool, skipTLSVerify bool) (*SecureSessionClient, error) {
-	client, err := newSecureSessionClient(addr, authToken, httpCertPool, skipTLSVerify)
+	client, err := newSecureSessionClient(addr, authToken, options.httpCertPool, options.skipTLSVerify)
 
 	if err != nil {
 		return nil, fmt.Errorf("error creating a secure session client: %v", err)
@@ -175,6 +204,7 @@ func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool,
 	// If in testing mode, skip verification. Otherwise, set ServerName based on key URI.
 	if skipTLSVerify {
 		cfg.InsecureSkipVerify = true
+		glog.Warningln("Skipping inner TLS verification.")
 	} else {
 		u, err := url.Parse(addr)
 		if err != nil {
