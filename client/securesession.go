@@ -77,7 +77,7 @@ func (ekmToken) RequireTransportSecurity() bool {
 
 // SecureSessionClient is a SecureSession service client.
 type SecureSessionClient struct {
-	client           confidentialEkmClient
+	client           ConfidentialEKMClient
 	shim             transportshim.ShimInterface
 	tls              *tls.Conn
 	state            clientState
@@ -192,7 +192,7 @@ func EstablishSecureSession(ctx context.Context, addr, authToken string, opts ..
 func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool, skipTLSVerify bool) (*SecureSessionClient, error) {
 	c := &SecureSessionClient{}
 
-	c.client = confidentialEkmClient{uri: addr, authToken: authToken, certPool: httpCertPool}
+	c.client = ConfidentialEKMClient{uri: addr, authToken: authToken, certPool: httpCertPool}
 	c.shim = transportshim.NewTransportShim()
 
 	cfg := &tls.Config{
