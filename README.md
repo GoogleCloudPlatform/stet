@@ -12,17 +12,20 @@ and `go build` commands), or via [Bazel](https://bazel.build/).
 ### Using Go's Native Toolchain
 
 1.  Install `make` and `curl` via `apt-get install build-essential curl`.
-2.  [Install Go 1.16+](https://golang.org/doc/install).
-3.  [Install `protoc` version 3](https://grpc.io/docs/protoc-installation/).
-4.  [Install Go plugins for the protocol compiler](https://grpc.io/docs/languages/go/quickstart/#prerequisites).
+2.  Install `libtspi` via `apt-get install libtspi-dev` (a
+    [temporary dependency](https://github.com/google/go-tpm-tools/issues/109) of
+    go-tpm-tools).
+3.  [Install Go 1.16+](https://golang.org/doc/install).
+4.  [Install `protoc` version 3](https://grpc.io/docs/protoc-installation/).
+5.  [Install Go plugins for the protocol compiler](https://grpc.io/docs/languages/go/quickstart/#prerequisites).
     *   Specifically, run `go install
         google.golang.org/protobuf/cmd/protoc-gen-go@v1.26` and `go install
         google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1`, then add `$(go env
         GOPATH)/bin` to your `PATH`.
-5.  From the root of this source repository, run `make all` to vendor `.proto`
+6.  From the root of this source repository, run `make all` to vendor `.proto`
     files and compile `pb.go` sources.
-6.  Build STET via `go build github.com/GoogleCloudPlatform/stet/cmd/stet`.
-7.  Copy the resulting binary to an executable location, granting it `suid`
+7.  Build STET via `go build github.com/GoogleCloudPlatform/stet/cmd/stet`.
+8.  Copy the resulting binary to an executable location, granting it `suid`
     permissions (root permissions are required to generate attestations in a
     Confidential VM):
 
@@ -35,10 +38,13 @@ and `go build` commands), or via [Bazel](https://bazel.build/).
 ### Using Bazel
 
 1.  [Install Bazel](https://docs.bazel.build/versions/main/install.html)
-2.  From the root of this source repository, run `bazel build cmd/stet:main`
+2.  Install `libtspi` via `apt-get install libtspi-dev` (a
+    [temporary dependency](https://github.com/google/go-tpm-tools/issues/109) of
+    go-tpm-tools).
+3.  From the root of this source repository, run `bazel build cmd/stet:main`
     *   This will download all necessary dependencies
     *   The resulting binary will be found at `bazel-bin/cmd/stet/main_/main`
-3.  Copy the resulting binary to an executable location, granting it `suid`
+4.  Copy the resulting binary to an executable location, granting it `suid`
     permissions (root permissions are required to generate attestations in a
     Confidential VM):
 

@@ -40,10 +40,10 @@ http_archive(
 # Needed to manage go dependencies
 http_archive(
     name = "bazel_gazelle",
-    sha256 = "62ca106be173579c0a167deb23358fdfe71ffa1e4cfdddf5582af26520f1c66f",
+    sha256 = "de69a09dc70417580aabf20a28619bb3ef60d038470c7cf8442fafcf627c21cb",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.23.0/bazel-gazelle-v0.23.0.tar.gz",
-        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.23.0/bazel-gazelle-v0.23.0.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.24.0/bazel-gazelle-v0.24.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.24.0/bazel-gazelle-v0.24.0.tar.gz",
     ],
 )
 
@@ -209,6 +209,29 @@ go_repository(
     importpath = "github.com/google/go-tpm",
     sum = "h1:3iQQ2dlEf+1no7CLlfLPYzxhQy7j2G/emBqU5okydaw=",
     version = "v0.3.2",
+)
+
+# Needed for com_github_google_go_tpm_tools.
+go_repository(
+    name = "com_github_google_go_attestation",
+    importpath = "github.com/google/go-attestation",
+    sum = "h1:MVYgi3XW4Ix0+2sEcJGNVNbxZFE56VjStrmtmYtE8Jo=",
+    version = "v0.3.2",
+)
+
+# Needed for com_github_google_go_attestation.
+go_repository(
+    name = "com_github_google_go_tspi",
+    importpath = "github.com/google/go-tspi",
+    commit = "115dea689aad055993e26f6423bf3cf800e732d7",
+)
+
+# Needed for com_github_google_go_attestation.
+go_repository(
+    name = "com_github_google_certificate_transparency_go",
+    importpath = "github.com/google/certificate-transparency-go",
+    sum = "h1:6JHXZhXEvilMcTjR4MGZn5KV0IRkcFl4CJx5iHVhjFE=",
+    version = "v1.1.1",
 )
 
 # Used to convert YAML to JSON for config files.

@@ -18,8 +18,11 @@ package server
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"sync"
 
@@ -30,7 +33,9 @@ import (
 	sspb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	ts "github.com/GoogleCloudPlatform/stet/transportshim"
 	glog "github.com/golang/glog"
+	"github.com/google/go-tpm-tools/server"
 	"github.com/google/uuid"
+	"google.golang.org/api/compute/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -64,6 +69,9 @@ type Channel struct {
 	shim   ts.ShimInterface
 	connID []byte
 	state  SrvState
+
+	// The negotiated attestation types.
+	attestationEvidenceTypes []attpb.AttestationEvidenceType
 }
 
 // SecureSessionService implements the SecureSession interface.
@@ -254,19 +262,19 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 	}
 
 	serverSelection := attpb.AttestationEvidenceTypeList{}
-	selectedEvidence := attpb.AttestationEvidenceType_UNKNOWN_EVIDENCE_TYPE
 	for _, tp := range clientAttList.Types {
-		if tp == attpb.AttestationEvidenceType_TPM2_QUOTE || tp == attpb.AttestationEvidenceType_TCG_EVENT_LOG || tp == attpb.AttestationEvidenceType_NULL_ATTESTATION {
-			selectedEvidence = tp
-			break
+		switch tp {
+		case attpb.AttestationEvidenceType_TPM2_QUOTE:
+		case attpb.AttestationEvidenceType_TCG_EVENT_LOG:
+			serverSelection.Types = append(serverSelection.Types, tp)
 		}
 	}
 
-	if selectedEvidence == attpb.AttestationEvidenceType_UNKNOWN_EVIDENCE_TYPE {
-		ch.state = ServerStateFailed
-		return nil, fmt.Errorf("client's AttestationEvidenceTypeList not supported by the server")
+	if len(serverSelection.Types) == 0 {
+		serverSelection.Types = append(serverSelection.Types, attpb.AttestationEvidenceType_NULL_ATTESTATION)
 	}
-	serverSelection.Types = append(serverSelection.Types, selectedEvidence)
+
+	ch.attestationEvidenceTypes = serverSelection.Types
 
 	buf, err = proto.Marshal(&serverSelection)
 	if err != nil {
@@ -348,6 +356,68 @@ func (s *SecureSessionService) Finalize(ctx context.Context, req *sspb.FinalizeR
 			ch.state = ServerStateFailed
 			return nil, fmt.Errorf("failed to unmarshal AttestationEvidence: %w", err)
 		}
+	}
+
+	attestationExpected := false
+	for _, tp := range ch.attestationEvidenceTypes {
+		switch tp {
+		case attpb.AttestationEvidenceType_TPM2_QUOTE:
+		case attpb.AttestationEvidenceType_TCG_EVENT_LOG:
+			attestationExpected = true
+		}
+	}
+
+	if attestationExpected {
+		att := clientAttEvidence.GetAttestation()
+
+		if att == nil {
+			return nil, fmt.Errorf("negotiated vTPM attestation but payload did not contain attestation")
+		}
+
+		instanceInfo := att.GetInstanceInfo()
+		if instanceInfo == nil {
+			return nil, fmt.Errorf("instanceInfo is empty; can't look up shielded instance identity")
+		}
+
+		client, err := compute.NewService(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("unable to create GCE client: %w", err)
+		}
+
+		instance, err := client.Instances.GetShieldedInstanceIdentity(
+			instanceInfo.GetProjectId(), instanceInfo.GetZone(), instanceInfo.GetInstanceName()).Do()
+		if err != nil {
+			return nil, fmt.Errorf("couldn't retrieve shielded instance identity: %w", err)
+		}
+
+		// Verify quote using the signing key returned by GetShieldedInstanceIdentity.
+		block, _ := pem.Decode([]byte(instance.SigningKey.EkPub))
+		if block == nil || block.Type != "PUBLIC KEY" {
+			return nil, fmt.Errorf("failed to decode PEM block containing public key")
+		}
+
+		pubKey, err := x509.ParsePKIXPublicKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("unable to parse EK cert from GetShieldedInstanceIdentity: %w", err)
+		}
+
+		// Recreate the nonce generated on the client side to validate the attestation.
+		tlsState := ch.conn.ConnectionState()
+		material, err := tlsState.ExportKeyingMaterial(constants.ExportLabel, nil, 32)
+		if err != nil {
+			return nil, fmt.Errorf("error exporting key material: %w", err)
+		}
+
+		nonce := []byte(constants.AttestationPrefix)
+		nonce = append(nonce, material...)
+
+		ms, err := server.VerifyAttestation(att, server.VerifyOpts{Nonce: nonce, TrustedAKs: []crypto.PublicKey{pubKey}})
+		if err != nil {
+			return nil, fmt.Errorf("failed to verify quote: %w", err)
+		}
+		glog.Infof("Verified quote for instance: %v; machine state: %v", instanceInfo.String(), ms)
+	} else {
+		glog.Infof("Negotiated null attestation; skipping attestation verification")
 	}
 
 	rep := &sspb.FinalizeResponse{}
