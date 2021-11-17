@@ -33,6 +33,7 @@ go_library(
         "//proto:secure_session_go_proto",
         "//transportshim",
         "@com_github_golang_glog//:glog",
+        "@com_github_google_go_tpm_tools//proto/attest:go_default_library",
         "@com_github_google_go_tpm_tools//server:go_default_library",
         "@com_github_google_uuid//:uuid",
         "@org_golang_google_api//compute/v1:go_default_library",

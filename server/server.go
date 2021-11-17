@@ -33,6 +33,7 @@ import (
 	sspb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	ts "github.com/GoogleCloudPlatform/stet/transportshim"
 	glog "github.com/golang/glog"
+	tpmpb "github.com/google/go-tpm-tools/proto/attest"
 	"github.com/google/go-tpm-tools/server"
 	"github.com/google/uuid"
 	"google.golang.org/api/compute/v1"
@@ -55,13 +56,22 @@ const (
 )
 
 const (
-	// KeyPath1 is the key path for key1 in the reference server.
+	// KeyPath1 is the key path for key1 in the reference server, which has
+	// no policy requirements.
 	KeyPath1 = "key1"
 	key1     = "key1encrypted"
-	// KeyPath2 is the key path for key2 in the reference server.
+
+	// KeyPath2 is the key path for key2 in the reference server, which requires
+	// a minimum technology of SEV to wrap or unwrap keys.
 	KeyPath2 = "key2"
 	key2     = "key2encrypted"
 )
+
+var requireSEV = &tpmpb.Policy{
+	Platform: &tpmpb.PlatformPolicy{
+		MinimumTechnology: tpmpb.GCEConfidentialTechnology_AMD_SEV,
+	},
+}
 
 // Channel for connection internals
 type Channel struct {
@@ -72,6 +82,10 @@ type Channel struct {
 
 	// The negotiated attestation types.
 	attestationEvidenceTypes []attpb.AttestationEvidenceType
+
+	// The MachineState corresponding to the attestation. This is nil if the
+	// workload presented the null attestation.
+	ms *tpmpb.MachineState
 }
 
 // SecureSessionService implements the SecureSession interface.
@@ -415,6 +429,8 @@ func (s *SecureSessionService) Finalize(ctx context.Context, req *sspb.FinalizeR
 		if err != nil {
 			return nil, fmt.Errorf("failed to verify quote: %w", err)
 		}
+
+		ch.ms = ms
 		glog.Infof("Verified quote for instance: %v; machine state: %v", instanceInfo.String(), ms)
 	} else {
 		glog.Infof("Negotiated null attestation; skipping attestation verification")
@@ -456,6 +472,13 @@ func (s *SecureSessionService) ConfidentialWrap(ctx context.Context, req *cwpb.C
 	keyURI := fmt.Sprintf("%v%v", wrapRequest.GetKeyUriPrefix(), wrapRequest.GetKeyPath())
 	if _, found = s.keys[keyURI]; !found {
 		return nil, fmt.Errorf("key URI unknown by this server: %v", keyURI)
+	}
+
+	// Require SEV for `KeyPath2`.
+	if keyURI == KeyPath2 {
+		if err := server.EvaluatePolicy(ch.ms, requireSEV); err != nil {
+			return nil, fmt.Errorf("attestation did not meet policy for key %v: %w", keyURI, err)
+		}
 	}
 
 	wrapResponse := cwpb.WrapResponse{}
@@ -509,6 +532,13 @@ func (s *SecureSessionService) ConfidentialUnwrap(ctx context.Context, req *cwpb
 	key, found := s.keys[keyURI]
 	if !found {
 		return nil, fmt.Errorf("key URI unknown by this server: %v", keyURI)
+	}
+
+	// Require SEV for `KeyPath2`.
+	if keyURI == KeyPath2 {
+		if err := server.EvaluatePolicy(ch.ms, requireSEV); err != nil {
+			return nil, fmt.Errorf("attestation did not meet policy for key %v: %w", keyURI, err)
+		}
 	}
 
 	unwrapResponse := cwpb.UnwrapResponse{}

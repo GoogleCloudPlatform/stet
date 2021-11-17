@@ -21,49 +21,42 @@ import (
 	pb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 )
 
-// temporarily disabling these.
-/*
-func TestBeginSession(t *testing.T) {
+func TestBeginSessionFailsWithNoRecords(t *testing.T) {
 	s := SecureSessionService{}
 
 	ctx := context.Background()
 	req := &pb.BeginSessionRequest{}
-	_, err := s.BeginSession(ctx, req)
-	if err != nil {
-		t.Fatalf("BeginSession failed")
+	if _, err := s.BeginSession(ctx, req); err == nil {
+		t.Fatalf("Expected BeginSession to fail with no TLS records, but got no error")
 	}
 }
 
-func TestHandshake(t *testing.T) {
+func TestHandshakeFailsWithNoRecords(t *testing.T) {
 	s := SecureSessionService{}
 
 	ctx := context.Background()
 	req := &pb.HandshakeRequest{}
-	_, err := s.Handshake(ctx, req)
-	if err != nil {
-		t.Fatalf("Handshake Failed")
+	if _, err := s.Handshake(ctx, req); err == nil {
+		t.Fatalf("Expected Handshake to fail with no TLS records, but got no error")
 	}
 }
-*/
 
-func TestNegotiateAttestation(t *testing.T) {
+func TestNegotiateAttestationFailsWithNoRecords(t *testing.T) {
 	s := SecureSessionService{}
 
 	ctx := context.Background()
 	req := &pb.NegotiateAttestationRequest{}
-	_, err := s.NegotiateAttestation(ctx, req)
-	if err == nil {
-		t.Fatalf("Expected NegotiateAttestation to be unimplemented")
+	if _, err := s.NegotiateAttestation(ctx, req); err == nil {
+		t.Fatalf("Expected NegotiateAttestation to fail with no TLS records, but got no error")
 	}
 }
 
-func TestFinalize(t *testing.T) {
+func TestFinalizeFailsWithNoRecords(t *testing.T) {
 	s := SecureSessionService{}
 
 	ctx := context.Background()
 	req := &pb.FinalizeRequest{}
-	_, err := s.Finalize(ctx, req)
-	if err == nil {
-		t.Fatalf("Expected Finalize to be unimplemented")
+	if _, err := s.Finalize(ctx, req); err == nil {
+		t.Fatalf("Expected Finalize to fail with no TLS records, but got no error")
 	}
 }
