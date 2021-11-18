@@ -241,6 +241,22 @@ go_repository(
     commit = "11e43d4a8b9271a822a950dbf9b6ff15fe00fafc",
 )
 
+# Used to colourize terminal output.
+go_repository(
+    name = "com_github_alecthomas_colour",
+    importpath = "github.com/alecthomas/colour",
+    sum = "h1:nOE9rJm6dsZ66RGWYSFrXw461ZIt9A6+nHgL7FRrDUk=",
+    version = "v0.1.0"
+)
+
+# Needed for com_github_alecthomas_colour.
+go_repository(
+    name = "com_github_mattn_go_isatty",
+    importpath = "github.com/mattn/go-isatty",
+    sum = "h1:yVuAays6BHfxijgZPzw+3Zlu5yQgKGP2/hcQbHb7S9Y=",
+    version = "v0.0.14"
+)
+
 # General go toolchain dependencies
 load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
 go_rules_dependencies()

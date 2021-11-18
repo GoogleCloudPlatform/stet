@@ -50,6 +50,12 @@ type ConfidentialEKMClient struct {
 	certPool  *x509.CertPool
 }
 
+// NewConfidentialEKMClient constructs a new ConfidentialEKMClient against
+// the given URI.
+func NewConfidentialEKMClient(uri string) ConfidentialEKMClient {
+	return ConfidentialEKMClient{uri: uri}
+}
+
 // Removes the last two path component from the key URI.
 func removeEndpointPathComponent(url string) string {
 	for i := 0; i < 2; i++ {
