@@ -366,102 +366,106 @@ func (c *SecureSessionClient) finalize(ctx context.Context) error {
 
 	// If the TPM device is present, generate an attestation.
 	if rwc, err := tpm2.OpenTPM("/dev/tpmrm0"); err == nil {
-		ek, err := tpmclient.GceAttestationKeyRSA(rwc)
-		if err != nil {
-			return fmt.Errorf("error generating and loading the GCE RSA AK: %v", err)
-		}
-		defer ek.Close()
+		if ek, err := tpmclient.GceAttestationKeyRSA(rwc); err != nil {
+			glog.Errorf("Error generating and loading the GCE RSA AK: %v", err)
+			glog.Infof("Skipping attestation generation")
+		} else {
+			defer ek.Close()
 
-		// Resolve the most recent supported nonce type from the server's repsonse.
-		preferredNonceTypes := []aepb.NonceType{
-			aepb.NonceType_NONCE_EKM32,
-		}
+			// Resolve the most recent supported nonce type from the server's repsonse.
+			preferredNonceTypes := []aepb.NonceType{
+				aepb.NonceType_NONCE_EKM32,
+			}
 
-		// Fallback to NONCE_EKM32 if the server responds with a 0-length list of
-		// nonce types (this implies server has not implemented negotiation).
-		negotiatedNonceType := aepb.NonceType_NONCE_EKM32
+			// Fallback to NONCE_EKM32 if the server responds with a 0-length list of
+			// nonce types (this implies server has not implemented negotiation).
+			negotiatedNonceType := aepb.NonceType_NONCE_EKM32
 
-	nonceLoop:
-		for _, nonceType := range preferredNonceTypes {
-			for _, serverNonceType := range c.attestationTypes.GetNonceTypes() {
-				if nonceType == serverNonceType {
-					negotiatedNonceType = nonceType
-					break nonceLoop
+		nonceLoop:
+			for _, nonceType := range preferredNonceTypes {
+				for _, serverNonceType := range c.attestationTypes.GetNonceTypes() {
+					if nonceType == serverNonceType {
+						negotiatedNonceType = nonceType
+						break nonceLoop
+					}
 				}
 			}
-		}
 
-		var nonce []byte
+			var nonce []byte
 
-		switch negotiatedNonceType {
-		case aepb.NonceType_NONCE_EKM32:
-			// Generate exported keying material and attestation.
-			tlsState := c.tls.ConnectionState()
-			material, err := tlsState.ExportKeyingMaterial(constants.ExportLabel, nil, 32)
-			if err != nil {
-				return fmt.Errorf("error exporting key material: %v", err)
+			switch negotiatedNonceType {
+			case aepb.NonceType_NONCE_EKM32:
+				// Generate exported keying material and attestation.
+				tlsState := c.tls.ConnectionState()
+				material, err := tlsState.ExportKeyingMaterial(constants.ExportLabel, nil, 32)
+				if err != nil {
+					return fmt.Errorf("error exporting key material: %v", err)
+				}
+
+				nonce = append(nonce, []byte(constants.AttestationPrefix)...)
+				nonce = append(nonce, material...)
+			default:
+				return fmt.Errorf("negotiated unknown nonce type: %v", negotiatedNonceType)
 			}
 
-			nonce = append(nonce, []byte(constants.AttestationPrefix)...)
-			nonce = append(nonce, material...)
-		default:
-			return fmt.Errorf("negotiated unknown nonce type: %v", negotiatedNonceType)
+			att, err := ek.Attest(tpmclient.AttestOpts{Nonce: nonce})
+
+			if err != nil {
+				return fmt.Errorf("error generating attestation: %v", err)
+			}
+
+			glog.Infof("Obtained attestation from the vTPM")
+
+			if err := tryDeescalatePrivileges(); err != nil {
+				return fmt.Errorf("failed to de-escalate to user privileges: %w", err)
+			}
+
+			// Add GCE instance info to the attestation proto.
+			projectID, err := metadata.ProjectID()
+			// If unable to retrieve the Project ID, set to empty string.
+			if err != nil {
+				projectID = ""
+			}
+
+			zone, err := metadata.Zone()
+			// If unable to retrieve the Zone, set to empty string.
+			if err != nil {
+				zone = ""
+			}
+
+			instanceName, err := metadata.InstanceName()
+			// If unable to retrieve the Instance Name, set to empty string.
+			if err != nil {
+				instanceName = ""
+			}
+
+			att.InstanceInfo = &atpb.GCEInstanceInfo{
+				Zone:         zone,
+				ProjectId:    projectID,
+				InstanceName: instanceName,
+			}
+
+			evidence = aepb.AttestationEvidence{
+				Attestation: att,
+			}
+
+			// Session-encrypt the attestation evidence proto.
+			marshaledEvidence, err := proto.Marshal(&evidence)
+			if err != nil {
+				return fmt.Errorf("error marshalling evidence to a proto: %v", err)
+			}
+
+			// Pass the buffer through TLS.
+			if _, err := c.tls.Write(marshaledEvidence); err != nil {
+				return fmt.Errorf("error writing records to TLS: %v", err)
+			}
+
+			// Wait for TLS session to process, then add session-protected records to request.
+			req.AttestationEvidenceRecords = c.shim.DrainSendBuf()
 		}
-
-		att, err := ek.Attest(tpmclient.AttestOpts{Nonce: nonce})
-
-		if err != nil {
-			return fmt.Errorf("error generating attestation: %v", err)
-		}
-
-		glog.Infof("Obtained attestation from the vTPM")
-
-		if err := tryDeescalatePrivileges(); err != nil {
-			return fmt.Errorf("failed to de-escalate to user privileges: %w", err)
-		}
-
-		// Add GCE instance info to the attestation proto.
-		projectID, err := metadata.ProjectID()
-		// If unable to retrieve the Project ID, set to empty string.
-		if err != nil {
-			projectID = ""
-		}
-
-		zone, err := metadata.Zone()
-		// If unable to retrieve the Zone, set to empty string.
-		if err != nil {
-			zone = ""
-		}
-
-		instanceName, err := metadata.InstanceName()
-		// If unable to retrieve the Instance Name, set to empty string.
-		if err != nil {
-			instanceName = ""
-		}
-
-		att.InstanceInfo = &atpb.GCEInstanceInfo{
-			Zone:         zone,
-			ProjectId:    projectID,
-			InstanceName: instanceName,
-		}
-
-		evidence = aepb.AttestationEvidence{
-			Attestation: att,
-		}
-
-		// Session-encrypt the attestation evidence proto.
-		marshaledEvidence, err := proto.Marshal(&evidence)
-		if err != nil {
-			return fmt.Errorf("error marshalling evidence to a proto: %v", err)
-		}
-
-		// Pass the buffer through TLS.
-		if _, err := c.tls.Write(marshaledEvidence); err != nil {
-			return fmt.Errorf("error writing records to TLS: %v", err)
-		}
-
-		// Wait for TLS session to process, then add session-protected records to request.
-		req.AttestationEvidenceRecords = c.shim.DrainSendBuf()
+	} else {
+		glog.Errorf("Error opening TPM device: %v", err)
+		glog.Infof("Skipping attestation generation")
 	}
 
 	if _, err := c.client.Finalize(ctx, req); err != nil {
