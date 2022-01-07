@@ -65,9 +65,9 @@ go_library(
     deps = ["@com_github_hashicorp_errwrap//:errwrap"],
 )
 """,
-    sha256 = "7539cacf9bd451dfddf4bbe62b8682e1d4d682bc35427c9b87d85a415d15df2a",
-    strip_prefix = "vault-1.7.5",
-    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.7.5.tar.gz"],
+    sha256 = "90c1205ec4e9b1025f5d7e66da7b0d7c931f2e6e57bf0be3a7d0895c9457dbfe",
+    strip_prefix = "vault-1.7.6",
+    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.7.6.tar.gz"],
 )
 
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
