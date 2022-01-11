@@ -278,14 +278,9 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 	serverSelection := attpb.AttestationEvidenceTypeList{}
 	for _, tp := range clientAttList.Types {
 		switch tp {
-		case attpb.AttestationEvidenceType_TPM2_QUOTE:
-		case attpb.AttestationEvidenceType_TCG_EVENT_LOG:
+		case attpb.AttestationEvidenceType_NULL_ATTESTATION, attpb.AttestationEvidenceType_TPM2_QUOTE, attpb.AttestationEvidenceType_TCG_EVENT_LOG:
 			serverSelection.Types = append(serverSelection.Types, tp)
 		}
-	}
-
-	if len(serverSelection.Types) == 0 {
-		serverSelection.Types = append(serverSelection.Types, attpb.AttestationEvidenceType_NULL_ATTESTATION)
 	}
 
 	ch.attestationEvidenceTypes = serverSelection.Types

@@ -286,7 +286,10 @@ func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
 		SessionContext: c.ctx,
 	}
 
-	evidenceTypes := &aepb.AttestationEvidenceTypeList{}
+	// The client should always support null attestations.
+	evidenceTypes := &aepb.AttestationEvidenceTypeList{
+		Types: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+	}
 
 	// Attempt to re-escalate execution privileges.
 	if err := tryReescalatePrivileges(); err != nil {
@@ -295,7 +298,6 @@ func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
 
 	if _, err := tpm2.OpenTPM("/dev/tpmrm0"); err != nil {
 		glog.Infof("TPM not available. Using null attestation")
-		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_NULL_ATTESTATION)
 	} else {
 		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_TPM2_QUOTE)
 		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_TCG_EVENT_LOG)
