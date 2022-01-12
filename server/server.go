@@ -283,6 +283,10 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 		}
 	}
 
+	if len(serverSelection.Types) == 0 {
+		return nil, fmt.Errorf("unable to negotiate any acceptable attestation evidence types")
+	}
+
 	ch.attestationEvidenceTypes = serverSelection.Types
 
 	buf, err = proto.Marshal(&serverSelection)
