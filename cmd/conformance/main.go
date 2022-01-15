@@ -438,6 +438,147 @@ func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationE
 	return nil
 }
 
+type endSessionTest struct {
+	testName         string
+	expectErr        bool
+	mutateTLSRecords func(r []byte) []byte
+	mutateSessionKey func(s []byte) []byte
+}
+
+func runEndSessionTestCase(mutateTLSRecords, mutateSessionKey func(r []byte) []byte) error {
+	ctx := context.Background()
+
+	c := newEKMClient(*keyURI, tls.VersionTLS13)
+
+	req := &sspb.BeginSessionRequest{
+		TlsRecords: c.shim.DrainSendBuf(),
+	}
+
+	resp, err := c.client.BeginSession(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	c.shim.QueueReceiveBuf(resp.GetTlsRecords())
+
+	req2 := &sspb.HandshakeRequest{
+		SessionContext: resp.GetSessionContext(),
+		TlsRecords:     c.shim.DrainSendBuf(),
+	}
+
+	resp2, err := c.client.Handshake(ctx, req2)
+	if err != nil {
+		return err
+	}
+
+	// If TLS 1.2, enqueue response bytes (TLS 1.3 has none).
+	if len(resp.GetTlsRecords()) > 0 {
+		c.shim.QueueReceiveBuf(resp2.GetTlsRecords())
+	}
+
+	evidenceTypeList := &aepb.AttestationEvidenceTypeList{
+		Types:      []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+		NonceTypes: []aepb.NonceType{aepb.NonceType_NONCE_EKM32},
+	}
+
+	marshaledEvidenceTypes, err := proto.Marshal(evidenceTypeList)
+	if err != nil {
+		return fmt.Errorf("error marshalling evidence type list to proto: %v", err)
+	}
+
+	if _, err := c.tls.Write(marshaledEvidenceTypes); err != nil {
+		return fmt.Errorf("error writing evidence type list to TLS connection: %v", err)
+	}
+
+	// Capture the TLS session-protected records and send them over the RPC.
+	offeredEvidenceTypeRecords := c.shim.DrainSendBuf()
+
+	req3 := &sspb.NegotiateAttestationRequest{
+		SessionContext:              resp.GetSessionContext(),
+		OfferedEvidenceTypesRecords: offeredEvidenceTypeRecords,
+	}
+
+	resp3, err := c.client.NegotiateAttestation(ctx, req3)
+	if err != nil {
+		return err
+	}
+
+	records := resp3.GetRequiredEvidenceTypesRecords()
+
+	if len(records) == 0 {
+		return fmt.Errorf("got no evidence bytes from server response")
+	}
+
+	// Attempt to unmarshal the response by passing the serialized bytes to the
+	// TLS implementation, and unmarshal the resulting decrypted bytes.
+	evidenceRecords := resp3.GetRequiredEvidenceTypesRecords()
+	c.shim.QueueReceiveBuf(evidenceRecords)
+
+	readBuf := make([]byte, recordBufferSize)
+	n, err := c.tls.Read(readBuf)
+
+	if err != nil {
+		return fmt.Errorf("error reading data from TLS connection: %v", err)
+	}
+
+	// Unmarshal the response written back from the TLS intercept.
+	negotiatedTypes := &aepb.AttestationEvidenceTypeList{}
+	if err = proto.Unmarshal(readBuf[:n], negotiatedTypes); err != nil {
+		return fmt.Errorf("error parsing attestation types into a proto: %v", err)
+	}
+
+	if len(negotiatedTypes.GetTypes()) == 0 {
+		return fmt.Errorf("server responded with no attestation types")
+	}
+
+	req4 := &sspb.FinalizeRequest{
+		SessionContext: resp.GetSessionContext(),
+	}
+
+	evidence := aepb.AttestationEvidence{
+		Attestation: &apb.Attestation{},
+	}
+
+	marshaledEvidence, err := proto.Marshal(&evidence)
+	if err != nil {
+		return fmt.Errorf("error marshalling attestation evidence to proto: %v", err)
+	}
+
+	if _, err := c.tls.Write(marshaledEvidence); err != nil {
+		return fmt.Errorf("error writing evidence to TLS connection: %v", err)
+	}
+
+	// Wait for TLS session to process, then add session-protected records to request.
+	req4.AttestationEvidenceRecords = c.shim.DrainSendBuf()
+
+	if _, err := c.client.Finalize(ctx, req4); err != nil {
+		return err
+	}
+
+	sessionContext := resp.GetSessionContext()
+	if mutateSessionKey != nil {
+		sessionContext = mutateSessionKey(sessionContext)
+	}
+
+	// Session-encrypt the EndSession constant string.
+	if _, err := c.tls.Write([]byte(constants.EndSessionString)); err != nil {
+		return fmt.Errorf("error session-encrypting the EndSession constant: %v", err)
+	}
+
+	records = c.shim.DrainSendBuf()
+	if mutateTLSRecords != nil {
+		records = mutateTLSRecords(records)
+	}
+
+	req5 := &sspb.EndSessionRequest{
+		SessionContext: sessionContext,
+		TlsRecords:     records,
+	}
+
+	_, err = c.client.EndSession(ctx, req5)
+	return err
+}
+
 func main() {
 	flag.Parse()
 
@@ -679,6 +820,36 @@ func main() {
 			testCase.mockAttestation, testCase.mutateTLSRecords, testCase.mutateSessionKey)
 		testPassed := testCase.expectErr == (err != nil)
 
+		if testPassed {
+			colour.Printf(" - ^2%v^R\n", testCase.testName)
+		} else {
+			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
+		}
+	}
+
+	// Define and run EndSession tests.
+	fmt.Println("\nRunning EndSession tests...")
+
+	endSessionTestCases := []endSessionTest{
+		{
+			testName:  "Establish secure session then valid EndSession",
+			expectErr: false,
+		},
+		{
+			testName:         "No TLS records in request",
+			expectErr:        true,
+			mutateTLSRecords: emptyFn,
+		},
+		{
+			testName:         "Invalid session key",
+			expectErr:        true,
+			mutateSessionKey: emptyFn,
+		},
+	}
+
+	for _, testCase := range endSessionTestCases {
+		err := runEndSessionTestCase(testCase.mutateTLSRecords, testCase.mutateSessionKey)
+		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
 		} else {
