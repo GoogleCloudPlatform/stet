@@ -7,6 +7,7 @@ go_binary(
         "//client",
         "//constants",
         "//proto:attestation_evidence_go_proto",
+        "//proto:confidential_wrap_go_proto",
         "//proto:secure_session_go_proto",
         "//server",
         "//transportshim",
