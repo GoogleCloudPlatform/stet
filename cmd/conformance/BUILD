@@ -11,6 +11,8 @@ go_binary(
         "//server",
         "//transportshim",
         "@com_github_alecthomas_colour//:go_default_library",
+        "@com_github_google_go_tpm//tpm2:go_default_library",
+        "@com_github_google_go_tpm_tools//proto/attest:go_default_library",
         "@org_golang_google_protobuf//proto",
     ],
 )

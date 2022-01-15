@@ -28,6 +28,8 @@ import (
 	"github.com/GoogleCloudPlatform/stet/server"
 	"github.com/GoogleCloudPlatform/stet/transportshim"
 	"github.com/alecthomas/colour"
+	apb "github.com/google/go-tpm-tools/proto/attest"
+	"github.com/google/go-tpm/tpm2"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -80,9 +82,6 @@ func newEKMClient(keyURL string, tlsVersion int) ekmClient {
 // Returns an empty byte array.
 func emptyFn([]byte) []byte { return []byte{} }
 
-// Given a byte array `b`, returns `b`.
-func identityFn(b []byte) []byte { return b }
-
 type beginSessionTest struct {
 	testName         string
 	expectErr        bool
@@ -99,14 +98,18 @@ func runBeginSessionTestCase(mutateTLSRecords func(r []byte) []byte) error {
 	}
 
 	// Mutate the request TLS records.
-	req.TlsRecords = mutateTLSRecords(req.TlsRecords)
+	records := req.TlsRecords
+	if mutateTLSRecords != nil {
+		records = mutateTLSRecords(records)
+	}
+	req.TlsRecords = records
 
 	resp, err := c.client.BeginSession(ctx, req)
 	if err != nil {
 		return err
 	}
 
-	records := resp.GetTlsRecords()
+	records = resp.GetTlsRecords()
 
 	if records[0] != recordHeaderHandshake {
 		return fmt.Errorf("Handshake record not received")
@@ -140,12 +143,21 @@ func runHandshakeTestCase(mutateTLSRecords, mutateSessionKey func(r []byte) []by
 		return err
 	}
 
-	sessionContext := mutateSessionKey(resp.GetSessionContext())
+	sessionContext := resp.GetSessionContext()
+	if mutateSessionKey != nil {
+		sessionContext = mutateSessionKey(sessionContext)
+	}
+
 	c.shim.QueueReceiveBuf(resp.GetTlsRecords())
+
+	records := c.shim.DrainSendBuf()
+	if mutateTLSRecords != nil {
+		records = mutateTLSRecords(records)
+	}
 
 	req2 := &sspb.HandshakeRequest{
 		SessionContext: sessionContext,
-		TlsRecords:     mutateTLSRecords(c.shim.DrainSendBuf()),
+		TlsRecords:     records,
 	}
 
 	_, err = c.client.Handshake(ctx, req2)
@@ -199,7 +211,7 @@ func runNegotiateAttestationTestCase(evidenceTypes []aepb.AttestationEvidenceTyp
 
 	req2 := &sspb.HandshakeRequest{
 		SessionContext: resp.GetSessionContext(),
-		TlsRecords:     mutateTLSRecords(c.shim.DrainSendBuf()),
+		TlsRecords:     c.shim.DrainSendBuf(),
 	}
 
 	resp2, err := c.client.Handshake(ctx, req2)
@@ -228,8 +240,14 @@ func runNegotiateAttestationTestCase(evidenceTypes []aepb.AttestationEvidenceTyp
 
 	// Capture the TLS session-protected records and send them over the RPC.
 	offeredEvidenceTypeRecords := c.shim.DrainSendBuf()
+	if mutateTLSRecords != nil {
+		offeredEvidenceTypeRecords = mutateTLSRecords(offeredEvidenceTypeRecords)
+	}
 
-	sessionContext := mutateSessionKey(resp.GetSessionContext())
+	sessionContext := resp.GetSessionContext()
+	if mutateSessionKey != nil {
+		sessionContext = mutateSessionKey(sessionContext)
+	}
 
 	req3 := &sspb.NegotiateAttestationRequest{
 		SessionContext:              sessionContext,
@@ -272,15 +290,164 @@ func runNegotiateAttestationTestCase(evidenceTypes []aepb.AttestationEvidenceTyp
 	return negotiatedTypes, nil
 }
 
+type finalizeTest struct {
+	testName         string
+	fullAttestation  bool
+	expectErr        bool
+	evidenceTypes    []aepb.AttestationEvidenceType
+	nonceTypes       []aepb.NonceType
+	mockAttestation  *apb.Attestation
+	mutateTLSRecords func(r []byte) []byte
+	mutateSessionKey func(s []byte) []byte
+}
+
+func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationEvidenceType, nonceTypes []aepb.NonceType,
+	mockAttestation *apb.Attestation, mutateTLSRecords, mutateSessionKey func(r []byte) []byte) error {
+	ctx := context.Background()
+
+	// If running a test case where we are trying to generate a complete attestation, just use the
+	// EstablishSecureSession() method from the `client` package (since it already has the complete
+	// logic for generating attestations, etc).
+	if fullAttestation {
+		_, err := client.EstablishSecureSession(ctx, *keyURI, "", client.SkipTLSVerify(true))
+		return err
+	}
+
+	c := newEKMClient(*keyURI, tls.VersionTLS13)
+
+	req := &sspb.BeginSessionRequest{
+		TlsRecords: c.shim.DrainSendBuf(),
+	}
+
+	resp, err := c.client.BeginSession(ctx, req)
+	if err != nil {
+		return err
+	}
+
+	c.shim.QueueReceiveBuf(resp.GetTlsRecords())
+
+	req2 := &sspb.HandshakeRequest{
+		SessionContext: resp.GetSessionContext(),
+		TlsRecords:     c.shim.DrainSendBuf(),
+	}
+
+	resp2, err := c.client.Handshake(ctx, req2)
+	if err != nil {
+		return err
+	}
+
+	// If TLS 1.2, enqueue response bytes (TLS 1.3 has none).
+	if len(resp.GetTlsRecords()) > 0 {
+		c.shim.QueueReceiveBuf(resp2.GetTlsRecords())
+	}
+
+	evidenceTypeList := &aepb.AttestationEvidenceTypeList{
+		Types:      evidenceTypes,
+		NonceTypes: nonceTypes,
+	}
+
+	marshaledEvidenceTypes, err := proto.Marshal(evidenceTypeList)
+	if err != nil {
+		return fmt.Errorf("error marshalling evidence type list to proto: %v", err)
+	}
+
+	if _, err := c.tls.Write(marshaledEvidenceTypes); err != nil {
+		return fmt.Errorf("error writing evidence type list to TLS connection: %v", err)
+	}
+
+	// Capture the TLS session-protected records and send them over the RPC.
+	offeredEvidenceTypeRecords := c.shim.DrainSendBuf()
+
+	req3 := &sspb.NegotiateAttestationRequest{
+		SessionContext:              resp.GetSessionContext(),
+		OfferedEvidenceTypesRecords: offeredEvidenceTypeRecords,
+	}
+
+	resp3, err := c.client.NegotiateAttestation(ctx, req3)
+	if err != nil {
+		return err
+	}
+
+	records := resp3.GetRequiredEvidenceTypesRecords()
+
+	if len(records) == 0 {
+		return fmt.Errorf("got no evidence bytes from server response")
+	}
+
+	// Attempt to unmarshal the response by passing the serialized bytes to the
+	// TLS implementation, and unmarshal the resulting decrypted bytes.
+	evidenceRecords := resp3.GetRequiredEvidenceTypesRecords()
+	c.shim.QueueReceiveBuf(evidenceRecords)
+
+	readBuf := make([]byte, recordBufferSize)
+	n, err := c.tls.Read(readBuf)
+
+	if err != nil {
+		return fmt.Errorf("error reading data from TLS connection: %v", err)
+	}
+
+	// Unmarshal the response written back from the TLS intercept.
+	negotiatedTypes := &aepb.AttestationEvidenceTypeList{}
+	if err = proto.Unmarshal(readBuf[:n], negotiatedTypes); err != nil {
+		return fmt.Errorf("error parsing attestation types into a proto: %v", err)
+	}
+
+	if len(negotiatedTypes.GetTypes()) == 0 {
+		return fmt.Errorf("server responded with no attestation types")
+	}
+
+	sessionContext := resp.GetSessionContext()
+	if mutateSessionKey != nil {
+		sessionContext = mutateSessionKey(sessionContext)
+	}
+
+	req4 := &sspb.FinalizeRequest{
+		SessionContext: sessionContext,
+	}
+
+	att := &apb.Attestation{}
+	if mockAttestation != nil {
+		att = mockAttestation
+	}
+
+	evidence := aepb.AttestationEvidence{
+		Attestation: att,
+	}
+
+	marshaledEvidence, err := proto.Marshal(&evidence)
+	if err != nil {
+		return fmt.Errorf("error marshalling attestation evidence to proto: %v", err)
+	}
+
+	if _, err := c.tls.Write(marshaledEvidence); err != nil {
+		return fmt.Errorf("error writing evidence to TLS connection: %v", err)
+	}
+
+	// Wait for TLS session to process, then add session-protected records to request.
+	records = c.shim.DrainSendBuf()
+	if mutateTLSRecords != nil {
+		records = mutateTLSRecords(records)
+	}
+
+	req4.AttestationEvidenceRecords = records
+
+	if _, err := c.client.Finalize(ctx, req4); err != nil {
+		return err
+	}
+
+	return nil
+}
+
 func main() {
+	flag.Parse()
+
 	// Define and run BeginSession tests.
 	fmt.Println("Running BeginSession tests...")
 
 	beginSessionTestCases := []beginSessionTest{
 		{
-			testName:         "Valid request with proper TLS Client Hello",
-			expectErr:        false,
-			mutateTLSRecords: identityFn,
+			testName:  "Valid request with proper TLS Client Hello",
+			expectErr: false,
 		},
 		{
 			testName:  "Malformed Client Hello in request",
@@ -312,21 +479,17 @@ func main() {
 
 	handshakeTestCases := []handshakeTest{
 		{
-			testName:         "Valid request with proper TLS Client Handshake",
-			expectErr:        false,
-			mutateTLSRecords: identityFn,
-			mutateSessionKey: identityFn,
+			testName:  "Valid request with proper TLS Client Handshake",
+			expectErr: false,
 		},
 		{
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
-			mutateSessionKey: identityFn,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
-			mutateTLSRecords: identityFn,
 			mutateSessionKey: emptyFn,
 		},
 	}
@@ -346,11 +509,9 @@ func main() {
 
 	negotiateAttestationTestCases := []negotiateAttestationTest{
 		{
-			testName:         "Valid request requesting null attestation",
-			expectErr:        false,
-			evidenceTypes:    []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
-			mutateTLSRecords: identityFn,
-			mutateSessionKey: identityFn,
+			testName:      "Valid request requesting null attestation",
+			expectErr:     false,
+			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
 		},
 		{
 			testName:  "Valid request supporting all vTPM attestation types",
@@ -359,8 +520,6 @@ func main() {
 				aepb.AttestationEvidenceType_TPM2_QUOTE,
 				aepb.AttestationEvidenceType_TCG_EVENT_LOG,
 			},
-			mutateTLSRecords: identityFn,
-			mutateSessionKey: identityFn,
 		},
 		{
 			testName:  "Valid request supporting all vTPM attestation types + null attestation",
@@ -370,8 +529,6 @@ func main() {
 				aepb.AttestationEvidenceType_TPM2_QUOTE,
 				aepb.AttestationEvidenceType_TCG_EVENT_LOG,
 			},
-			mutateTLSRecords: identityFn,
-			mutateSessionKey: identityFn,
 		},
 		{
 			testName:  "Valid request with server-unsupported evidence type",
@@ -379,8 +536,6 @@ func main() {
 			evidenceTypes: []aepb.AttestationEvidenceType{
 				aepb.AttestationEvidenceType_UNKNOWN_EVIDENCE_TYPE,
 			},
-			mutateTLSRecords: identityFn,
-			mutateSessionKey: identityFn,
 		},
 		{
 			testName:  "Valid request with server-unsupported evidence type + null attestation",
@@ -389,8 +544,6 @@ func main() {
 				aepb.AttestationEvidenceType_UNKNOWN_EVIDENCE_TYPE,
 				aepb.AttestationEvidenceType_NULL_ATTESTATION,
 			},
-			mutateTLSRecords: identityFn,
-			mutateSessionKey: identityFn,
 		},
 		{
 			testName:  "Valid request trying to negotiate nonce types",
@@ -402,21 +555,17 @@ func main() {
 			nonceTypes: []aepb.NonceType{
 				aepb.NonceType_NONCE_EKM32,
 			},
-			mutateTLSRecords: identityFn,
-			mutateSessionKey: identityFn,
 		},
 		{
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			evidenceTypes:    []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
 			mutateTLSRecords: emptyFn,
-			mutateSessionKey: identityFn,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
 			evidenceTypes:    []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
-			mutateTLSRecords: identityFn,
 			mutateSessionKey: emptyFn,
 		},
 	}
@@ -468,6 +617,66 @@ func main() {
 			}
 		}
 
+		testPassed := testCase.expectErr == (err != nil)
+
+		if testPassed {
+			colour.Printf(" - ^2%v^R\n", testCase.testName)
+		} else {
+			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
+		}
+	}
+
+	// Define and run Finalize tests.
+	fmt.Println("\nRunning Finalize tests...")
+
+	finalizeTestCases := []finalizeTest{
+		{
+			testName:      "Valid request requesting null attestation",
+			expectErr:     false,
+			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+		},
+		{
+			testName:        "Valid request requesting vTPM attestation evidence",
+			fullAttestation: true,
+			expectErr:       false,
+			evidenceTypes: []aepb.AttestationEvidenceType{
+				aepb.AttestationEvidenceType_TPM2_QUOTE,
+				aepb.AttestationEvidenceType_TCG_EVENT_LOG,
+			},
+		},
+		{
+			testName:  "Invalid attestation records",
+			expectErr: true,
+			evidenceTypes: []aepb.AttestationEvidenceType{
+				aepb.AttestationEvidenceType_TPM2_QUOTE,
+				aepb.AttestationEvidenceType_TCG_EVENT_LOG,
+			},
+			mockAttestation: &apb.Attestation{AkPub: []byte("badestation")},
+		},
+		{
+			testName:         "Invalid session key",
+			expectErr:        true,
+			evidenceTypes:    []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+			mutateSessionKey: emptyFn,
+		},
+	}
+
+	// Check for TPM and root privileges to determine if we can generate attestations.
+	_, err := tpm2.OpenTPM("/dev/tpmrm0")
+	canAttest := err == nil
+
+	if !canAttest {
+		colour.Println("^5Note: Skipping test cases that require generating attestations.^R")
+	}
+
+	for _, testCase := range finalizeTestCases {
+		if testCase.fullAttestation && !canAttest {
+			colour.Printf(" - ^5%v [skipped]^R\n", testCase.testName)
+			continue
+		}
+
+		err := runFinalizeTestCase(testCase.fullAttestation, testCase.evidenceTypes, testCase.nonceTypes,
+			testCase.mockAttestation, testCase.mutateTLSRecords, testCase.mutateSessionKey)
 		testPassed := testCase.expectErr == (err != nil)
 
 		if testPassed {
