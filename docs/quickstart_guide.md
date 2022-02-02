@@ -99,8 +99,7 @@ Cloud KMS of the location of this key.
     *   **You will need get the key URI from step 4 before finishing the key
         creation.**
     *   Take note of the service account that needs to be authorized in the EKM.
-    *   See the
-        [Cloud EKM documentation](https://cloud.google.com/kms/docs/managing-external-keys)
+    *   See the [Cloud EKM documentation](https://cloud.google.com/kms/docs/ekm)
         for more information.
 1.  Create a key in the EKM. Please refer to the user guide provided by the EKM.
     *   If using Thales' CipherTrust Cloud Key Manager, note the following
