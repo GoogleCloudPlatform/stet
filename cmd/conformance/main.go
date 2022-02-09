@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -56,16 +57,16 @@ type ekmClient struct {
 	tls    *tls.Conn
 }
 
-// Initializes a new EKM client for the given version of TLS against the
-// given key URL, also kicking off the internal TLS handshake.
-func newEKMClient(keyURL string, tlsVersion int) ekmClient {
+// Initializes a new EKM client against the given key URL with the given
+// cipher suites, also kicking off the internal TLS handshake.
+func newEKMClientWithSuites(keyURL string, cipherSuites []uint16) ekmClient {
 	c := ekmClient{}
 	c.client = client.NewConfidentialEKMClient(keyURL)
 
 	c.shim = transportshim.NewTransportShim()
 
 	cfg := &tls.Config{
-		CipherSuites:       constants.AllowableCipherSuites,
+		CipherSuites:       cipherSuites,
 		MinVersion:         tls.VersionTLS12,
 		MaxVersion:         tls.VersionTLS13,
 		InsecureSkipVerify: true,
@@ -82,6 +83,10 @@ func newEKMClient(keyURL string, tlsVersion int) ekmClient {
 	return c
 }
 
+func newEKMClient(keyURL string) ekmClient {
+	return newEKMClientWithSuites(keyURL, constants.AllowableCipherSuites)
+}
+
 // Returns an empty byte array.
 func emptyFn([]byte) []byte { return []byte{} }
 
@@ -89,12 +94,18 @@ type beginSessionTest struct {
 	testName         string
 	expectErr        bool
 	mutateTLSRecords func(r []byte) []byte
+	altCipherSuites  []uint16
 }
 
-func runBeginSessionTestCase(mutateTLSRecords func(r []byte) []byte) error {
+func runBeginSessionTestCase(mutateTLSRecords func(r []byte) []byte, altCipherSuites []uint16) error {
 	ctx := context.Background()
 
-	c := newEKMClient(*keyURI, tls.VersionTLS13)
+	var c ekmClient
+	if altCipherSuites != nil {
+		c = newEKMClientWithSuites(*keyURI, altCipherSuites)
+	} else {
+		c = newEKMClient(*keyURI)
+	}
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -113,15 +124,21 @@ func runBeginSessionTestCase(mutateTLSRecords func(r []byte) []byte) error {
 	}
 
 	records = resp.GetTlsRecords()
+	if len(records) < 6 {
+		return fmt.Errorf("length of record (%d) too short to be a Server Hello", len(records))
+	}
 
 	if records[0] != recordHeaderHandshake {
-		return fmt.Errorf("Handshake record not received")
+		return fmt.Errorf("handshake record not received")
 	}
 
 	if records[5] != handshakeHeaderServerHello {
-		return fmt.Errorf("Response is not Server Hello")
+		return fmt.Errorf("response is not Server Hello")
 	}
 
+	if records[1] == 3 && records[2] == 3 && altCipherSuites != nil {
+		return errors.New("fake error to match the TLS 1.2 test")
+	}
 	return nil
 }
 
@@ -135,7 +152,7 @@ type handshakeTest struct {
 func runHandshakeTestCase(mutateTLSRecords, mutateSessionKey func(r []byte) []byte) error {
 	ctx := context.Background()
 
-	c := newEKMClient(*keyURI, tls.VersionTLS13)
+	c := newEKMClient(*keyURI)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -199,7 +216,7 @@ func runNegotiateAttestationTestCase(evidenceTypes []aepb.AttestationEvidenceTyp
 	mutateTLSRecords, mutateSessionKey func(r []byte) []byte) (*aepb.AttestationEvidenceTypeList, error) {
 	ctx := context.Background()
 
-	c := newEKMClient(*keyURI, tls.VersionTLS13)
+	c := newEKMClient(*keyURI)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -316,7 +333,7 @@ func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationE
 		return err
 	}
 
-	c := newEKMClient(*keyURI, tls.VersionTLS13)
+	c := newEKMClient(*keyURI)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -445,7 +462,7 @@ func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationE
 func establishSecureSession() (*ekmClient, []byte, error) {
 	ctx := context.Background()
 
-	c := newEKMClient(*keyURI, tls.VersionTLS13)
+	c := newEKMClient(*keyURI)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -810,10 +827,15 @@ func main() {
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
 		},
+		{
+			testName:        "Invalid cipher suite",
+			expectErr:       true,
+			altCipherSuites: []uint16{tls.TLS_RSA_WITH_AES_256_GCM_SHA384},
+		},
 	}
 
 	for _, testCase := range beginSessionTestCases {
-		err := runBeginSessionTestCase(testCase.mutateTLSRecords)
+		err := runBeginSessionTestCase(testCase.mutateTLSRecords, testCase.altCipherSuites)
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
@@ -847,8 +869,10 @@ func main() {
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else {
+		} else if err != nil {
 			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
+		} else {
+			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
 
@@ -969,8 +993,10 @@ func main() {
 
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else {
+		} else if err != nil {
 			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
+		} else {
+			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
 
@@ -1029,8 +1055,10 @@ func main() {
 
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else {
+		} else if err != nil {
 			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
+		} else {
+			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
 
@@ -1059,8 +1087,10 @@ func main() {
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else {
+		} else if err != nil {
 			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
+		} else {
+			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
 
@@ -1097,8 +1127,10 @@ func main() {
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else {
+		} else if err != nil {
 			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
+		} else {
+			colour.Printf(" - ^1%v^R missing error\n", testCase.testName)
 		}
 	}
 
@@ -1133,8 +1165,10 @@ func main() {
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else {
+		} else if err != nil {
 			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
+		} else {
+			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
 

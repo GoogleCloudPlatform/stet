@@ -203,7 +203,7 @@ go_repository(
     ],
 )
 
-# Needed for com_github_google_go_tpm_tools.
+# Needed for conformance test.
 go_repository(
     name = "com_github_google_go_tpm",
     importpath = "github.com/google/go-tpm",

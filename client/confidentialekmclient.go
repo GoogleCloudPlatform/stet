@@ -21,6 +21,7 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/hex"
 	"fmt"
 	"io/ioutil"
 	"net/http"
@@ -40,6 +41,7 @@ const (
 	endSessionEndpoint           = "/session/endsession"
 	confidentialWrapEndpoint     = ":confidentialwrap"
 	confidentialUnwrapEndpoint   = ":confidentialunwrap"
+	tlsAlertRecord               = 21
 )
 
 // ConfidentialEKMClient is an HTTP client that has methods for making
@@ -123,6 +125,9 @@ func (c ConfidentialEKMClient) BeginSession(ctx context.Context, req *sspb.Begin
 		return nil, err
 	}
 
+	if resp.GetTlsRecords()[0] == tlsAlertRecord {
+		return resp, fmt.Errorf("TLS alert in response: %s", hex.EncodeToString(resp.GetTlsRecords()))
+	}
 	return resp, nil
 }
 
