@@ -425,31 +425,28 @@ func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationE
 		SessionContext: sessionContext,
 	}
 
-	att := &apb.Attestation{}
 	if mockAttestation != nil {
-		att = mockAttestation
-	}
+		evidence := aepb.AttestationEvidence{
+			Attestation: mockAttestation,
+		}
 
-	evidence := aepb.AttestationEvidence{
-		Attestation: att,
-	}
+		marshaledEvidence, err := proto.Marshal(&evidence)
+		if err != nil {
+			return fmt.Errorf("error marshalling attestation evidence to proto: %v", err)
+		}
 
-	marshaledEvidence, err := proto.Marshal(&evidence)
-	if err != nil {
-		return fmt.Errorf("error marshalling attestation evidence to proto: %v", err)
-	}
+		if _, err := c.tls.Write(marshaledEvidence); err != nil {
+			return fmt.Errorf("error writing evidence to TLS connection: %v", err)
+		}
 
-	if _, err := c.tls.Write(marshaledEvidence); err != nil {
-		return fmt.Errorf("error writing evidence to TLS connection: %v", err)
-	}
+		// Wait for TLS session to process, then add session-protected records to request.
+		records = c.shim.DrainSendBuf()
+		if mutateTLSRecords != nil {
+			records = mutateTLSRecords(records)
+		}
 
-	// Wait for TLS session to process, then add session-protected records to request.
-	records = c.shim.DrainSendBuf()
-	if mutateTLSRecords != nil {
-		records = mutateTLSRecords(records)
+		req4.AttestationEvidenceRecords = records
 	}
-
-	req4.AttestationEvidenceRecords = records
 
 	if _, err := c.client.Finalize(ctx, req4); err != nil {
 		return err
@@ -1032,6 +1029,14 @@ func main() {
 			expectErr:        true,
 			evidenceTypes:    []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
 			mutateSessionKey: emptyFn,
+		},
+		{
+			testName:  "Evidence doesn't match negotiated",
+			expectErr: true,
+			evidenceTypes: []aepb.AttestationEvidenceType{
+				aepb.AttestationEvidenceType_TPM2_QUOTE,
+				aepb.AttestationEvidenceType_TCG_EVENT_LOG,
+			},
 		},
 	}
 
