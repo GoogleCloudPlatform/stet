@@ -97,12 +97,10 @@ type beginSessionTest struct {
 	altCipherSuites  []uint16
 }
 
-func runBeginSessionTestCase(mutateTLSRecords func(r []byte) []byte, altCipherSuites []uint16) error {
-	ctx := context.Background()
-
+func runBeginSessionTestCase(ctx context.Context, t beginSessionTest) error {
 	var c ekmClient
-	if altCipherSuites != nil {
-		c = newEKMClientWithSuites(*keyURI, altCipherSuites)
+	if t.altCipherSuites != nil {
+		c = newEKMClientWithSuites(*keyURI, t.altCipherSuites)
 	} else {
 		c = newEKMClient(*keyURI)
 	}
@@ -113,8 +111,8 @@ func runBeginSessionTestCase(mutateTLSRecords func(r []byte) []byte, altCipherSu
 
 	// Mutate the request TLS records.
 	records := req.TlsRecords
-	if mutateTLSRecords != nil {
-		records = mutateTLSRecords(records)
+	if t.mutateTLSRecords != nil {
+		records = t.mutateTLSRecords(records)
 	}
 	req.TlsRecords = records
 
@@ -136,7 +134,7 @@ func runBeginSessionTestCase(mutateTLSRecords func(r []byte) []byte, altCipherSu
 		return fmt.Errorf("response is not Server Hello")
 	}
 
-	if records[1] == 3 && records[2] == 3 && altCipherSuites != nil {
+	if records[1] == 3 && records[2] == 3 && t.altCipherSuites != nil {
 		return errors.New("fake error to match the TLS 1.2 test")
 	}
 	return nil
@@ -149,9 +147,7 @@ type handshakeTest struct {
 	mutateSessionKey func(s []byte) []byte
 }
 
-func runHandshakeTestCase(mutateTLSRecords, mutateSessionKey func(r []byte) []byte) error {
-	ctx := context.Background()
-
+func runHandshakeTestCase(ctx context.Context, t handshakeTest) error {
 	c := newEKMClient(*keyURI)
 
 	req := &sspb.BeginSessionRequest{
@@ -164,15 +160,15 @@ func runHandshakeTestCase(mutateTLSRecords, mutateSessionKey func(r []byte) []by
 	}
 
 	sessionContext := resp.GetSessionContext()
-	if mutateSessionKey != nil {
-		sessionContext = mutateSessionKey(sessionContext)
+	if t.mutateSessionKey != nil {
+		sessionContext = t.mutateSessionKey(sessionContext)
 	}
 
 	c.shim.QueueReceiveBuf(resp.GetTlsRecords())
 
 	records := c.shim.DrainSendBuf()
-	if mutateTLSRecords != nil {
-		records = mutateTLSRecords(records)
+	if t.mutateTLSRecords != nil {
+		records = t.mutateTLSRecords(records)
 	}
 
 	req2 := &sspb.HandshakeRequest{
@@ -212,10 +208,7 @@ type negotiateAttestationTest struct {
 	mutateSessionKey func(s []byte) []byte
 }
 
-func runNegotiateAttestationTestCase(evidenceTypes []aepb.AttestationEvidenceType, nonceTypes []aepb.NonceType,
-	mutateTLSRecords, mutateSessionKey func(r []byte) []byte) (*aepb.AttestationEvidenceTypeList, error) {
-	ctx := context.Background()
-
+func runNegotiateAttestationTestCase(ctx context.Context, t negotiateAttestationTest) (*aepb.AttestationEvidenceTypeList, error) {
 	c := newEKMClient(*keyURI)
 
 	req := &sspb.BeginSessionRequest{
@@ -245,8 +238,8 @@ func runNegotiateAttestationTestCase(evidenceTypes []aepb.AttestationEvidenceTyp
 	}
 
 	evidenceTypeList := &aepb.AttestationEvidenceTypeList{
-		Types:      evidenceTypes,
-		NonceTypes: nonceTypes,
+		Types:      t.evidenceTypes,
+		NonceTypes: t.nonceTypes,
 	}
 
 	marshaledEvidenceTypes, err := proto.Marshal(evidenceTypeList)
@@ -260,13 +253,13 @@ func runNegotiateAttestationTestCase(evidenceTypes []aepb.AttestationEvidenceTyp
 
 	// Capture the TLS session-protected records and send them over the RPC.
 	offeredEvidenceTypeRecords := c.shim.DrainSendBuf()
-	if mutateTLSRecords != nil {
-		offeredEvidenceTypeRecords = mutateTLSRecords(offeredEvidenceTypeRecords)
+	if t.mutateTLSRecords != nil {
+		offeredEvidenceTypeRecords = t.mutateTLSRecords(offeredEvidenceTypeRecords)
 	}
 
 	sessionContext := resp.GetSessionContext()
-	if mutateSessionKey != nil {
-		sessionContext = mutateSessionKey(sessionContext)
+	if t.mutateSessionKey != nil {
+		sessionContext = t.mutateSessionKey(sessionContext)
 	}
 
 	req3 := &sspb.NegotiateAttestationRequest{
@@ -321,14 +314,11 @@ type finalizeTest struct {
 	mutateSessionKey func(s []byte) []byte
 }
 
-func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationEvidenceType, nonceTypes []aepb.NonceType,
-	mockAttestation *apb.Attestation, mutateTLSRecords, mutateSessionKey func(r []byte) []byte) error {
-	ctx := context.Background()
-
+func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
 	// If running a test case where we are trying to generate a complete attestation, just use the
 	// EstablishSecureSession() method from the `client` package (since it already has the complete
 	// logic for generating attestations, etc).
-	if fullAttestation {
+	if t.fullAttestation {
 		_, err := client.EstablishSecureSession(ctx, *keyURI, "", client.SkipTLSVerify(true))
 		return err
 	}
@@ -362,8 +352,8 @@ func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationE
 	}
 
 	evidenceTypeList := &aepb.AttestationEvidenceTypeList{
-		Types:      evidenceTypes,
-		NonceTypes: nonceTypes,
+		Types:      t.evidenceTypes,
+		NonceTypes: t.nonceTypes,
 	}
 
 	marshaledEvidenceTypes, err := proto.Marshal(evidenceTypeList)
@@ -417,17 +407,17 @@ func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationE
 	}
 
 	sessionContext := resp.GetSessionContext()
-	if mutateSessionKey != nil {
-		sessionContext = mutateSessionKey(sessionContext)
+	if t.mutateSessionKey != nil {
+		sessionContext = t.mutateSessionKey(sessionContext)
 	}
 
 	req4 := &sspb.FinalizeRequest{
 		SessionContext: sessionContext,
 	}
 
-	if mockAttestation != nil {
+	if t.mockAttestation != nil {
 		evidence := aepb.AttestationEvidence{
-			Attestation: mockAttestation,
+			Attestation: t.mockAttestation,
 		}
 
 		marshaledEvidence, err := proto.Marshal(&evidence)
@@ -441,8 +431,8 @@ func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationE
 
 		// Wait for TLS session to process, then add session-protected records to request.
 		records = c.shim.DrainSendBuf()
-		if mutateTLSRecords != nil {
-			records = mutateTLSRecords(records)
+		if t.mutateTLSRecords != nil {
+			records = t.mutateTLSRecords(records)
 		}
 
 		req4.AttestationEvidenceRecords = records
@@ -456,9 +446,7 @@ func runFinalizeTestCase(fullAttestation bool, evidenceTypes []aepb.AttestationE
 }
 
 // Establishes a secure session, returning the ekmClient and session context.
-func establishSecureSession() (*ekmClient, []byte, error) {
-	ctx := context.Background()
-
+func establishSecureSession(ctx context.Context) (*ekmClient, []byte, error) {
 	c := newEKMClient(*keyURI)
 
 	req := &sspb.BeginSessionRequest{
@@ -576,14 +564,14 @@ type endSessionTest struct {
 	mutateSessionKey func(s []byte) []byte
 }
 
-func runEndSessionTestCase(mutateTLSRecords, mutateSessionKey func(r []byte) []byte) error {
-	c, sessionContext, err := establishSecureSession()
+func runEndSessionTestCase(ctx context.Context, t endSessionTest) error {
+	c, sessionContext, err := establishSecureSession(ctx)
 	if err != nil {
 		return err
 	}
 
-	if mutateSessionKey != nil {
-		sessionContext = mutateSessionKey(sessionContext)
+	if t.mutateSessionKey != nil {
+		sessionContext = t.mutateSessionKey(sessionContext)
 	}
 
 	// Session-encrypt the EndSession constant string.
@@ -592,8 +580,8 @@ func runEndSessionTestCase(mutateTLSRecords, mutateSessionKey func(r []byte) []b
 	}
 
 	records := c.shim.DrainSendBuf()
-	if mutateTLSRecords != nil {
-		records = mutateTLSRecords(records)
+	if t.mutateTLSRecords != nil {
+		records = t.mutateTLSRecords(records)
 	}
 
 	req5 := &sspb.EndSessionRequest{
@@ -601,7 +589,7 @@ func runEndSessionTestCase(mutateTLSRecords, mutateSessionKey func(r []byte) []b
 		TlsRecords:     records,
 	}
 
-	_, err = c.client.EndSession(context.Background(), req5)
+	_, err = c.client.EndSession(ctx, req5)
 	return err
 }
 
@@ -610,24 +598,40 @@ type confidentialWrapUnwrapTest struct {
 	expectErr        bool
 	keyPath          string
 	extraCalls       int
+	closeSession     bool
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
 }
 
-func runConfidentialWrapTestCase(keyPath string, extraWraps int, mutateTLSRecords, mutateSessionKey func(r []byte) []byte) error {
-	c, sessionContext, err := establishSecureSession()
+func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTest) error {
+	c, sessionContext, err := establishSecureSession(ctx)
 	if err != nil {
 		return err
 	}
 
-	for i := 0; i <= extraWraps; i++ {
-		if mutateSessionKey != nil {
-			sessionContext = mutateSessionKey(sessionContext)
+	if t.closeSession {
+		if _, err := c.tls.Write([]byte(constants.EndSessionString)); err != nil {
+			return fmt.Errorf("session-encrypting the EndSession constant: %w", err)
+		}
+
+		records := c.shim.DrainSendBuf()
+		_, err := c.client.EndSession(ctx, &sspb.EndSessionRequest{
+			SessionContext: sessionContext,
+			TlsRecords:     records,
+		})
+		if err != nil {
+			return fmt.Errorf("ending session: %w", err)
+		}
+	}
+
+	for i := 0; i <= t.extraCalls; i++ {
+		if t.mutateSessionKey != nil {
+			sessionContext = t.mutateSessionKey(sessionContext)
 		}
 
 		// Create a WrapRequest, marshal, then session-encrypt it.
 		wrapReq := &cwpb.WrapRequest{
-			KeyPath:   keyPath,
+			KeyPath:   t.keyPath,
 			Plaintext: []byte{0x01},
 			AdditionalContext: &cwpb.RequestContext{
 				RelativeResourceName: "myresource",
@@ -647,8 +651,8 @@ func runConfidentialWrapTestCase(keyPath string, extraWraps int, mutateTLSRecord
 		}
 
 		records := c.shim.DrainSendBuf()
-		if mutateTLSRecords != nil {
-			records = mutateTLSRecords(records)
+		if t.mutateTLSRecords != nil {
+			records = t.mutateTLSRecords(records)
 		}
 
 		req := &cwpb.ConfidentialWrapRequest{
@@ -661,7 +665,7 @@ func runConfidentialWrapTestCase(keyPath string, extraWraps int, mutateTLSRecord
 			},
 		}
 
-		_, err = c.client.ConfidentialWrap(context.Background(), req)
+		_, err = c.client.ConfidentialWrap(ctx, req)
 		if err != nil {
 			return fmt.Errorf("error session-encrypting the records: %v", err)
 		}
@@ -670,17 +674,33 @@ func runConfidentialWrapTestCase(keyPath string, extraWraps int, mutateTLSRecord
 	return err
 }
 
-func runConfidentialUnwrapTestCase(keyPath string, extraUnwraps int, mutateTLSRecords, mutateSessionKey func(r []byte) []byte) error {
-	c, sessionContext, err := establishSecureSession()
+func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrapTest) error {
+	c, sessionContext, err := establishSecureSession(ctx)
 	if err != nil {
 		return err
 	}
-	for i := 0; i <= extraUnwraps; i++ {
+
+	if t.closeSession {
+		if _, err := c.tls.Write([]byte(constants.EndSessionString)); err != nil {
+			return fmt.Errorf("session-encrypting the EndSession constant: %w", err)
+		}
+
+		records := c.shim.DrainSendBuf()
+		_, err := c.client.EndSession(ctx, &sspb.EndSessionRequest{
+			SessionContext: sessionContext,
+			TlsRecords:     records,
+		})
+		if err != nil {
+			return fmt.Errorf("ending session: %w", err)
+		}
+	}
+
+	for i := 0; i <= t.extraCalls; i++ {
 		plaintext := []byte("This is plaintext to encrypt.")
 
 		// Send a ConfidentialWrapRequest so we have a wrapped blob to decrypt.
 		wrapReq := &cwpb.WrapRequest{
-			KeyPath:   keyPath,
+			KeyPath:   t.keyPath,
 			Plaintext: plaintext,
 			AdditionalContext: &cwpb.RequestContext{
 				RelativeResourceName: "myresource",
@@ -700,8 +720,8 @@ func runConfidentialUnwrapTestCase(keyPath string, extraUnwraps int, mutateTLSRe
 		}
 
 		records := c.shim.DrainSendBuf()
-		if mutateTLSRecords != nil {
-			records = mutateTLSRecords(records)
+		if t.mutateTLSRecords != nil {
+			records = t.mutateTLSRecords(records)
 		}
 
 		req := &cwpb.ConfidentialWrapRequest{
@@ -714,7 +734,7 @@ func runConfidentialUnwrapTestCase(keyPath string, extraUnwraps int, mutateTLSRe
 			},
 		}
 
-		resp, err := c.client.ConfidentialWrap(context.Background(), req)
+		resp, err := c.client.ConfidentialWrap(ctx, req)
 		if err != nil {
 			return fmt.Errorf("error session-encrypting the records: %v", err)
 		}
@@ -737,7 +757,7 @@ func runConfidentialUnwrapTestCase(keyPath string, extraUnwraps int, mutateTLSRe
 
 		// Create an UnwrapRequest where the WrappedBlob is what we previously encrypted.
 		unwrapReq := &cwpb.UnwrapRequest{
-			KeyPath:     keyPath,
+			KeyPath:     t.keyPath,
 			WrappedBlob: wrapResp.GetWrappedBlob(),
 			AdditionalContext: &cwpb.RequestContext{
 				RelativeResourceName: "myresource",
@@ -757,12 +777,12 @@ func runConfidentialUnwrapTestCase(keyPath string, extraUnwraps int, mutateTLSRe
 		}
 
 		records = c.shim.DrainSendBuf()
-		if mutateTLSRecords != nil {
-			records = mutateTLSRecords(records)
+		if t.mutateTLSRecords != nil {
+			records = t.mutateTLSRecords(records)
 		}
 
-		if mutateSessionKey != nil {
-			sessionContext = mutateSessionKey(sessionContext)
+		if t.mutateSessionKey != nil {
+			sessionContext = t.mutateSessionKey(sessionContext)
 		}
 
 		req2 := &cwpb.ConfidentialUnwrapRequest{
@@ -775,7 +795,7 @@ func runConfidentialUnwrapTestCase(keyPath string, extraUnwraps int, mutateTLSRe
 			},
 		}
 
-		resp2, err := c.client.ConfidentialUnwrap(context.Background(), req2)
+		resp2, err := c.client.ConfidentialUnwrap(ctx, req2)
 		if err != nil {
 			return fmt.Errorf("error session-encrypting the records: %v", err)
 		}
@@ -806,6 +826,7 @@ func runConfidentialUnwrapTestCase(keyPath string, extraUnwraps int, mutateTLSRe
 
 func main() {
 	flag.Parse()
+	ctx := context.Background()
 
 	// Define and run BeginSession tests.
 	fmt.Println("Running BeginSession tests...")
@@ -836,7 +857,7 @@ func main() {
 	}
 
 	for _, testCase := range beginSessionTestCases {
-		err := runBeginSessionTestCase(testCase.mutateTLSRecords, testCase.altCipherSuites)
+		err := runBeginSessionTestCase(ctx, testCase)
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
@@ -866,7 +887,7 @@ func main() {
 	}
 
 	for _, testCase := range handshakeTestCases {
-		err := runHandshakeTestCase(testCase.mutateTLSRecords, testCase.mutateSessionKey)
+		err := runHandshakeTestCase(ctx, testCase)
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
@@ -944,7 +965,7 @@ func main() {
 	}
 
 	for _, testCase := range negotiateAttestationTestCases {
-		negotiatedTypes, err := runNegotiateAttestationTestCase(testCase.evidenceTypes, testCase.nonceTypes, testCase.mutateTLSRecords, testCase.mutateSessionKey)
+		negotiatedTypes, err := runNegotiateAttestationTestCase(ctx, testCase)
 
 		// Check that the negotiated types are what we expected.
 		if err == nil {
@@ -1058,8 +1079,7 @@ func main() {
 			continue
 		}
 
-		err := runFinalizeTestCase(testCase.fullAttestation, testCase.evidenceTypes, testCase.nonceTypes,
-			testCase.mockAttestation, testCase.mutateTLSRecords, testCase.mutateSessionKey)
+		err := runFinalizeTestCase(ctx, testCase)
 		testPassed := testCase.expectErr == (err != nil)
 
 		if testPassed {
@@ -1092,7 +1112,7 @@ func main() {
 	}
 
 	for _, testCase := range endSessionTestCases {
-		err := runEndSessionTestCase(testCase.mutateTLSRecords, testCase.mutateSessionKey)
+		err := runEndSessionTestCase(ctx, testCase)
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
@@ -1129,16 +1149,24 @@ func main() {
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
+			keyPath:          goodKeyPath,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
+			keyPath:          goodKeyPath,
+		},
+		{
+			testName:     "Close session before wrap",
+			expectErr:    true,
+			closeSession: true,
+			keyPath:      goodKeyPath,
 		},
 	}
 
 	for _, testCase := range confidentialWrapTestCases {
-		err := runConfidentialWrapTestCase(testCase.keyPath, testCase.extraCalls, testCase.mutateTLSRecords, testCase.mutateSessionKey)
+		err := runConfidentialWrapTestCase(ctx, testCase)
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
@@ -1173,16 +1201,24 @@ func main() {
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
+			keyPath:          goodKeyPath,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
+			keyPath:          goodKeyPath,
+		},
+		{
+			testName:     "Close session before unwrap",
+			expectErr:    true,
+			closeSession: true,
+			keyPath:      goodKeyPath,
 		},
 	}
 
 	for _, testCase := range confidentialUnwrapTestCases {
-		err := runConfidentialUnwrapTestCase(testCase.keyPath, testCase.extraCalls, testCase.mutateTLSRecords, testCase.mutateSessionKey)
+		err := runConfidentialUnwrapTestCase(ctx, testCase)
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
