@@ -38,7 +38,8 @@ import (
 )
 
 var (
-	keyURI = flag.String("key-uri", fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath1), "A valid key URI stored in the server")
+	keyURI          = flag.String("key-uri", fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath1), "A valid key URI stored in the server not protected by CC attestation")
+	protectedKeyURI = flag.String("protected-key-uri", fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath2), "A valid key URI stored in the server requiring CC attestation")
 )
 
 // recordBufferSize is the number of bytes allocated to buffers when reading
@@ -446,7 +447,7 @@ func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
 }
 
 // Establishes a secure session, returning the ekmClient and session context.
-func establishSecureSession(ctx context.Context) (*ekmClient, []byte, error) {
+func establishSecureSessionWithNullAttestation(ctx context.Context) (*ekmClient, []byte, error) {
 	c := newEKMClient(*keyURI)
 
 	req := &sspb.BeginSessionRequest{
@@ -565,7 +566,7 @@ type endSessionTest struct {
 }
 
 func runEndSessionTestCase(ctx context.Context, t endSessionTest) error {
-	c, sessionContext, err := establishSecureSession(ctx)
+	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx)
 	if err != nil {
 		return err
 	}
@@ -604,7 +605,8 @@ type confidentialWrapUnwrapTest struct {
 }
 
 func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTest) error {
-	c, sessionContext, err := establishSecureSession(ctx)
+	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx)
+
 	if err != nil {
 		return err
 	}
@@ -675,7 +677,8 @@ func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTe
 }
 
 func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrapTest) error {
-	c, sessionContext, err := establishSecureSession(ctx)
+	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx)
+
 	if err != nil {
 		return err
 	}
@@ -1124,6 +1127,7 @@ func main() {
 	}
 
 	goodKeyPath := (*keyURI)[strings.LastIndex(*keyURI, "/")+1:]
+	protectedKeyPath := (*protectedKeyURI)[strings.LastIndex(*protectedKeyURI, "/")+1:]
 
 	// Define and run ConfidentialWrap tests.
 	fmt.Println("\nRunning ConfidentialWrap tests...")
@@ -1162,6 +1166,11 @@ func main() {
 			expectErr:    true,
 			closeSession: true,
 			keyPath:      goodKeyPath,
+		},
+		{
+			testName:  "Wrap using protected key without CC attestation negotiated",
+			expectErr: true,
+			keyPath:   protectedKeyPath,
 		},
 	}
 
@@ -1214,6 +1223,11 @@ func main() {
 			expectErr:    true,
 			closeSession: true,
 			keyPath:      goodKeyPath,
+		},
+		{
+			testName:  "Unwrap using protected key without CC attestation negotiated",
+			expectErr: true,
+			keyPath:   protectedKeyPath,
 		},
 	}
 
