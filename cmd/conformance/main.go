@@ -954,6 +954,20 @@ func main() {
 			},
 		},
 		{
+			testName:  "Invalid request to negotiate Tpm2Quote without EventLog",
+			expectErr: true,
+			evidenceTypes: []aepb.AttestationEvidenceType{
+				aepb.AttestationEvidenceType_TPM2_QUOTE,
+			},
+		},
+		{
+			testName:  "Invalid request to negotiate EventLog without Tpm2Quote",
+			expectErr: true,
+			evidenceTypes: []aepb.AttestationEvidenceType{
+				aepb.AttestationEvidenceType_TCG_EVENT_LOG,
+			},
+		},
+		{
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			evidenceTypes:    []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},

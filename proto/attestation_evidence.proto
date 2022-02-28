@@ -33,8 +33,8 @@ message AttestationEvidence {
 enum AttestationEvidenceType {
   UNKNOWN_EVIDENCE_TYPE = 0;
   NULL_ATTESTATION = 1;  // Indicates workload unable to produce attestation.
-  TPM2_QUOTE = 2;        // AttestationEvidence.tpm2_quote
-  TCG_EVENT_LOG = 3;     // AttestationEvidence.tcg_event_log
+  TPM2_QUOTE = 2;        // AttestationEvidence.attestation.quotes
+  TCG_EVENT_LOG = 3;     // AttestationEvidence.attestation.canonical_event_log
 }
 
 // The types of nonces that may be used to generate attestations. This exists to

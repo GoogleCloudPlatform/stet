@@ -23,6 +23,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -88,12 +89,17 @@ type Channel struct {
 	ms *tpmpb.MachineState
 }
 
+type keyStruct struct {
+	EncryptionScheme  string
+	KeyAccessFunction func(*Channel) error
+}
+
 // SecureSessionService implements the SecureSession interface.
 type SecureSessionService struct {
 	tlsVersion uint16
 	mu         sync.Mutex
 	channels   map[string]*Channel
-	keys       map[string]string
+	keys       map[string]keyStruct
 
 	// Necessary to embed these to maintain forward compatibility.
 	pb.UnimplementedConfidentialEkmSessionEstablishmentServiceServer
@@ -109,7 +115,7 @@ const minUnchunkedAttestationSize = 1024
 // created through NewSecureSessionService to set up keys. keyURI must be valid.
 func (s *SecureSessionService) Wrap(keyURI string, aad, plaintext []byte) []byte {
 	key := s.keys[keyURI]
-	return append(append(aad, key...), plaintext...)
+	return append(append(aad, key.EncryptionScheme...), plaintext...)
 }
 
 // NewChannel sets up tls context and network shim
@@ -151,9 +157,19 @@ func NewChannel(tlsVersion uint16) (ch *Channel, err error) {
 func NewSecureSessionService(tlsVersion uint16) (srv *SecureSessionService, err error) {
 	srv = &SecureSessionService{tlsVersion: tlsVersion}
 	srv.channels = make(map[string]*Channel)
-	srv.keys = map[string]string{
-		KeyPath1: key1,
-		KeyPath2: key2,
+	srv.keys = map[string]keyStruct{
+		// No hardware protection for the key at KeyPath1.
+		KeyPath1: keyStruct{
+			EncryptionScheme:  key1,
+			KeyAccessFunction: func(_ *Channel) error { return nil },
+		},
+		// The key at KeyPath2 requires SEV to use.
+		KeyPath2: keyStruct{
+			EncryptionScheme: key2,
+			KeyAccessFunction: func(ch *Channel) error {
+				return server.EvaluatePolicy(ch.ms, requireSEV)
+			},
+		},
 	}
 	return srv, nil
 }
@@ -276,11 +292,26 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 	}
 
 	serverSelection := attpb.AttestationEvidenceTypeList{}
+	offeredMap := make(map[attpb.AttestationEvidenceType]bool)
 	for _, tp := range clientAttList.Types {
 		switch tp {
-		case attpb.AttestationEvidenceType_NULL_ATTESTATION, attpb.AttestationEvidenceType_TPM2_QUOTE, attpb.AttestationEvidenceType_TCG_EVENT_LOG:
-			serverSelection.Types = append(serverSelection.Types, tp)
+		case attpb.AttestationEvidenceType_NULL_ATTESTATION:
+			offeredMap[attpb.AttestationEvidenceType_NULL_ATTESTATION] = true
+		case attpb.AttestationEvidenceType_TPM2_QUOTE:
+			offeredMap[attpb.AttestationEvidenceType_TPM2_QUOTE] = true
+		case attpb.AttestationEvidenceType_TCG_EVENT_LOG:
+			offeredMap[attpb.AttestationEvidenceType_TCG_EVENT_LOG] = true
 		}
+	}
+
+	if offeredMap[attpb.AttestationEvidenceType_TCG_EVENT_LOG] != offeredMap[attpb.AttestationEvidenceType_TPM2_QUOTE] {
+		return nil, errors.New("if offering either the TPM2 Quote or the TCG Event Log, must offer both")
+	}
+
+	if offeredMap[attpb.AttestationEvidenceType_TPM2_QUOTE] {
+		serverSelection.Types = []attpb.AttestationEvidenceType{attpb.AttestationEvidenceType_TPM2_QUOTE, attpb.AttestationEvidenceType_TCG_EVENT_LOG}
+	} else if offeredMap[attpb.AttestationEvidenceType_NULL_ATTESTATION] {
+		serverSelection.Types = []attpb.AttestationEvidenceType{attpb.AttestationEvidenceType_NULL_ATTESTATION}
 	}
 
 	if len(serverSelection.Types) == 0 {
@@ -374,8 +405,7 @@ func (s *SecureSessionService) Finalize(ctx context.Context, req *sspb.FinalizeR
 	attestationExpected := false
 	for _, tp := range ch.attestationEvidenceTypes {
 		switch tp {
-		case attpb.AttestationEvidenceType_TPM2_QUOTE:
-		case attpb.AttestationEvidenceType_TCG_EVENT_LOG:
+		case attpb.AttestationEvidenceType_TPM2_QUOTE, attpb.AttestationEvidenceType_TCG_EVENT_LOG:
 			attestationExpected = true
 		}
 	}
@@ -469,15 +499,13 @@ func (s *SecureSessionService) ConfidentialWrap(ctx context.Context, req *cwpb.C
 	}
 
 	keyURI := fmt.Sprintf("%v%v", wrapRequest.GetKeyUriPrefix(), wrapRequest.GetKeyPath())
-	if _, found = s.keys[keyURI]; !found {
+	key, found := s.keys[keyURI]
+	if !found {
 		return nil, fmt.Errorf("key URI unknown by this server: %v", keyURI)
 	}
 
-	// Require SEV for `KeyPath2`.
-	if keyURI == KeyPath2 {
-		if err := server.EvaluatePolicy(ch.ms, requireSEV); err != nil {
-			return nil, fmt.Errorf("attestation did not meet policy for key %v: %w", keyURI, err)
-		}
+	if err := key.KeyAccessFunction(ch); err != nil {
+		return nil, fmt.Errorf("attestation did not meet policy for key %v: %w", keyURI, err)
 	}
 
 	wrapResponse := cwpb.WrapResponse{}
@@ -533,15 +561,12 @@ func (s *SecureSessionService) ConfidentialUnwrap(ctx context.Context, req *cwpb
 		return nil, fmt.Errorf("key URI unknown by this server: %v", keyURI)
 	}
 
-	// Require SEV for `KeyPath2`.
-	if keyURI == KeyPath2 {
-		if err := server.EvaluatePolicy(ch.ms, requireSEV); err != nil {
-			return nil, fmt.Errorf("attestation did not meet policy for key %v: %w", keyURI, err)
-		}
+	if err := key.KeyAccessFunction(ch); err != nil {
+		return nil, fmt.Errorf("attestation did not meet policy for key %v: %w", keyURI, err)
 	}
 
 	unwrapResponse := cwpb.UnwrapResponse{}
-	parts := bytes.SplitN(unwrapRequest.GetWrappedBlob(), []byte(key), 2)
+	parts := bytes.SplitN(unwrapRequest.GetWrappedBlob(), []byte(key.EncryptionScheme), 2)
 	if len(parts) != 2 {
 		return nil, fmt.Errorf("failed to decrypt wrapped blob")
 	}
