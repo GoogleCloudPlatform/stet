@@ -27,12 +27,13 @@ import (
 
 // metadataToAAD processes metadata to use as AAD for AEAD Encryption.
 // The serialization scheme is as follows (given n := len(md.shares)):
-//     len(md.shares[0].wrappedShare)      || md.shares[0].wrappedShare
-//     || len(md.shares[0].hash)           || md.shares[0].hash
-//     ...
-//     || len(md.shares[n-1].wrappedShare) || md.shares[n-1].wrappedShare
-//     || len(md.shares[n-1].hash)         || md.shares[n-1].hash
-//     || len(md.blobID)                   || md.blobID
+//
+//	len(md.shares[0].wrappedShare)      || md.shares[0].wrappedShare
+//	|| len(md.shares[0].hash)           || md.shares[0].hash
+//	...
+//	|| len(md.shares[n-1].wrappedShare) || md.shares[n-1].wrappedShare
+//	|| len(md.shares[n-1].hash)         || md.shares[n-1].hash
+//	|| len(md.blobID)                   || md.blobID
 //
 // Note that KeyConfig is explicitly omitted from the serialization,
 // as its presence is not important to the AAD.
