@@ -58,16 +58,14 @@ go_library(
     name = "shamir",
     srcs = [
         "shamir/shamir.go",
-        "shamir/tables.go",
     ],
     importpath = "github.com/hashicorp/vault/shamir",
     visibility = ["//visibility:public"],
-    deps = ["@com_github_hashicorp_errwrap//:errwrap"],
 )
 """,
-    sha256 = "90c1205ec4e9b1025f5d7e66da7b0d7c931f2e6e57bf0be3a7d0895c9457dbfe",
-    strip_prefix = "vault-1.7.6",
-    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.7.6.tar.gz"],
+    sha256 = "265b1632857af01984fa108644ef1e00f4545db889c21443025bf46941b9c845",
+    strip_prefix = "vault-1.13.2",
+    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.13.2.tar.gz"],
 )
 
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
