@@ -15,7 +15,7 @@ and `go build` commands), or via [Bazel](https://bazel.build/).
 2.  Install `libtspi` via `apt-get install libtspi-dev` (a
     [temporary dependency](https://github.com/google/go-tpm-tools/issues/109) of
     go-tpm-tools).
-3.  [Install Go 1.16+](https://golang.org/doc/install).
+3.  [Install Go 1.17+](https://golang.org/doc/install).
 4.  [Install `protoc` version 3](https://grpc.io/docs/protoc-installation/).
 5.  [Install Go plugins for the protocol compiler](https://grpc.io/docs/languages/go/quickstart/#prerequisites).
     *   Specifically, run `go install
