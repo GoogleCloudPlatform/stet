@@ -74,9 +74,6 @@ type StetClient struct {
 	// Client for performing Cloud KMS operations. Initialized via initializeKMSClient.
 	kmsClient cloudKMSClient
 
-	// Fake Cloud KMS Client for testing purposes.
-	fakeKeyManagementClient cloudKMSClient
-
 	// Fake Secure Session Client for testing purposes.
 	fakeSecureSessionClient secureSessionClient
 
@@ -96,37 +93,22 @@ func (c *StetClient) initializeKMSClient(ctx context.Context) error {
 		return nil
 	}
 
-	// Use the fake key management client if one was configured, otherwise initialize a real one.
-	if c.fakeKeyManagementClient != nil {
-		c.kmsClient = c.fakeKeyManagementClient
+	var err error
+
+	// Set user agent for Cloud KMS API calls.
+	ua := "STET/"
+	if c.Version != "" {
+		ua += c.Version
 	} else {
-		var err error
+		ua += "dev"
+	}
 
-		// Set user agent for Cloud KMS API calls.
-		ua := "STET/"
-		if c.Version != "" {
-			ua += c.Version
-		} else {
-			ua += "dev"
-		}
-
-		c.kmsClient, err = kms.NewKeyManagementClient(ctx, option.WithUserAgent(ua))
-		if err != nil {
-			return fmt.Errorf("error creating KMS client: %v", err)
-		}
+	c.kmsClient, err = kms.NewKeyManagementClient(ctx, option.WithUserAgent(ua))
+	if err != nil {
+		return fmt.Errorf("error creating KMS client: %v", err)
 	}
 
 	return nil
-}
-
-// setFakeKeyManagementClient allows a fake Cloud KMS client to be configured for testing purposes.
-func (c *StetClient) setFakeKeyManagementClient(fakeClient cloudKMSClient) {
-	c.fakeKeyManagementClient = fakeClient
-}
-
-// setFakeSecureSessionClient allows a fake Secure Session client to be configured for testing purposes.
-func (c *StetClient) setFakeSecureSessionClient(fakeClient secureSessionClient) {
-	c.fakeSecureSessionClient = fakeClient
 }
 
 // parseEKMKeyURI takes in the key URI for a key stored in an EKM, and returns

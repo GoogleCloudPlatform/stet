@@ -461,10 +461,7 @@ func TestEkmSecureSessionWrap(t *testing.T) {
 	md := kekMetadata{uri: testKEKURIExternal}
 	expectedCiphertext := append(plaintext, byte('E'))
 
-	fakeEkmClient := &fakeSecureSessionClient{}
-
-	var stetClient StetClient
-	stetClient.setFakeSecureSessionClient(fakeEkmClient)
+	stetClient := &StetClient{fakeSecureSessionClient: &fakeSecureSessionClient{}}
 
 	ciphertext, err := stetClient.ekmSecureSessionWrap(ctx, plaintext, md)
 	if err != nil {
@@ -502,8 +499,7 @@ func TestEkmSecureSessionWrapError(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		var stetClient StetClient
-		stetClient.setFakeSecureSessionClient(testCase.fakeEkmClient)
+		stetClient := &StetClient{fakeSecureSessionClient: testCase.fakeEkmClient}
 
 		_, err := stetClient.ekmSecureSessionWrap(ctx, []byte("this is plaintext"), kekMetadata{uri: "this is a uri"})
 		if err == nil {
@@ -518,10 +514,7 @@ func TestEkmSecureSessionUnwrap(t *testing.T) {
 	md := kekMetadata{uri: testKEKURIExternal}
 	ciphertext := append(expectedPlaintext, byte('E'))
 
-	fakeEkmClient := &fakeSecureSessionClient{}
-
-	var stetClient StetClient
-	stetClient.setFakeSecureSessionClient(fakeEkmClient)
+	stetClient := &StetClient{fakeSecureSessionClient: &fakeSecureSessionClient{}}
 
 	plaintext, err := stetClient.ekmSecureSessionUnwrap(ctx, ciphertext, md)
 	if err != nil {
@@ -559,8 +552,7 @@ func TestEkmSecureSessionUnwrapError(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		var stetClient StetClient
-		stetClient.setFakeSecureSessionClient(testCase.fakeEkmClient)
+		stetClient := &StetClient{fakeSecureSessionClient: testCase.fakeEkmClient}
 
 		_, err := stetClient.ekmSecureSessionUnwrap(ctx, []byte("this is ciphertext"), kekMetadata{uri: testKEKURIExternal})
 		if err == nil {
@@ -603,11 +595,10 @@ func TestWrapSharesIndividually(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			fakeKMSClient := &fakeKeyManagementClient{}
-
-			var stetClient StetClient
-			stetClient.setFakeKeyManagementClient(fakeKMSClient)
-			stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+			stetClient := &StetClient{
+				kmsClient:               &fakeKeyManagementClient{},
+				fakeSecureSessionClient: &fakeSecureSessionClient{},
+			}
 
 			ki := []*configpb.KekInfo{
 				&configpb.KekInfo{
@@ -824,10 +815,10 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 	}
 	ctx := context.Background()
 
-	fakeKMSClient := &fakeKeyManagementClient{}
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKMSClient)
-	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+	stetClient := &StetClient{
+		kmsClient:               &fakeKeyManagementClient{},
+		fakeSecureSessionClient: &fakeSecureSessionClient{},
+	}
 
 	wrapped, _, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
 
@@ -970,9 +961,10 @@ func TestWrapSharesError(t *testing.T) {
 				},
 			}
 
-			var stetClient StetClient
-			stetClient.setFakeKeyManagementClient(fakeKMSClient)
-			stetClient.setFakeSecureSessionClient(testCase.fakeSSClient)
+			stetClient := &StetClient{
+				kmsClient:               fakeKMSClient,
+				fakeSecureSessionClient: testCase.fakeSSClient,
+			}
 			_, _, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
 
 			if err == nil {
@@ -1025,11 +1017,10 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 
 	ctx := context.Background()
 
-	fakeKmsClient := &fakeKeyManagementClient{}
-
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKmsClient)
-	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+	stetClient := &StetClient{
+		kmsClient:               &fakeKeyManagementClient{},
+		fakeSecureSessionClient: &fakeSecureSessionClient{},
+	}
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1095,10 +1086,10 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 
 	ctx := context.Background()
 
-	fakeKmsClient := &fakeKeyManagementClient{}
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKmsClient)
-	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+	stetClient := &StetClient{
+		kmsClient:               &fakeKeyManagementClient{},
+		fakeSecureSessionClient: &fakeSecureSessionClient{},
+	}
 
 	unwrapped, err := stetClient.unwrapAndValidateShares(ctx, wrappedSharesList, kekInfoList, &configpb.AsymmetricKeys{})
 
@@ -1206,9 +1197,10 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 				},
 			}
 
-			var stetClient StetClient
-			stetClient.setFakeKeyManagementClient(fakeKmsClient)
-			stetClient.setFakeSecureSessionClient(testCase.fakeSSClient)
+			stetClient := &StetClient{
+				kmsClient:               fakeKmsClient,
+				fakeSecureSessionClient: testCase.fakeSSClient,
+			}
 			shares, err := stetClient.unwrapAndValidateShares(ctx, testCase.wrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
 
 			if testCase.expectedErrSubstr != "" && err == nil {
@@ -1245,10 +1237,10 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 
 	ctx := context.Background()
 
-	fakeKmsClient := &fakeKeyManagementClient{}
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKmsClient)
-	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+	stetClient := &StetClient{
+		kmsClient:               &fakeKeyManagementClient{},
+		fakeSecureSessionClient: &fakeSecureSessionClient{},
+	}
 
 	wrapped, _, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
 	if err != nil {
@@ -1308,11 +1300,10 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	fakeKMSClient := &fakeKeyManagementClient{}
-
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKMSClient)
-	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+	stetClient := &StetClient{
+		kmsClient:               &fakeKeyManagementClient{},
+		fakeSecureSessionClient: &fakeSecureSessionClient{},
+	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1368,11 +1359,10 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 	plaintext := []byte("This is data to be encrypted.")
 
 	ctx := context.Background()
-	fakeKMSClient := &fakeKeyManagementClient{}
-
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKMSClient)
-	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+	stetClient := &StetClient{
+		kmsClient:               &fakeKeyManagementClient{},
+		fakeSecureSessionClient: &fakeSecureSessionClient{},
+	}
 
 	plaintextBuf := bytes.NewReader(plaintext)
 	var ciphertextBuf bytes.Buffer
@@ -1429,9 +1419,10 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 		},
 	}
 
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKMSClient)
-	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+	stetClient := &StetClient{
+		kmsClient:               fakeKMSClient,
+		fakeSecureSessionClient: &fakeSecureSessionClient{},
+	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -1498,9 +1489,10 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 		},
 	}
 
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKMSClient)
-	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+	stetClient := &StetClient{
+		kmsClient:               fakeKMSClient,
+		fakeSecureSessionClient: &fakeSecureSessionClient{},
+	}
 
 	plaintextBuf := bytes.NewReader(plaintext)
 	var ciphertextBuf bytes.Buffer
@@ -1544,9 +1536,10 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 			return createEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
 		},
 	}
-	var stetClient StetClient
-	stetClient.setFakeKeyManagementClient(fakeKMSClient)
-	stetClient.setFakeSecureSessionClient(&fakeSecureSessionClient{})
+	stetClient := &StetClient{
+		kmsClient:               fakeKMSClient,
+		fakeSecureSessionClient: &fakeSecureSessionClient{},
+	}
 
 	blobIDs := []string{}
 
