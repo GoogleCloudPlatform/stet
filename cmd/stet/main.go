@@ -17,9 +17,12 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
+	"io/ioutil"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"flag"
@@ -34,6 +37,8 @@ import (
 const (
 	// The default name for the STET configuration file.
 	defaultConfigName string = "stet.yaml"
+	// The default permissions (u=rw,g=r,o=r)for new files created by STET, prior to unmask.
+	defaultFilePerms os.FileMode = 0644
 )
 
 // These variables can be overridden by ldflags, as GoReleaser does when
@@ -41,6 +46,65 @@ const (
 var commit string
 var date string
 var version string
+
+// First step to an atomic file write for output files.
+// Creates and returns a temporary file. finalizeOutput (below) should be called after the necessary
+// contents are written to the temporary file.
+func setupOutputFile(outputPath string) (*os.File, error) {
+	if outputPath == "" {
+		return nil, errors.New("no output file path specified")
+	}
+
+	// Create a temporary file. For atomicity, it will be renamed to the proper output file name once
+	// at the end of the workflow.
+	parent := filepath.Dir(outputPath)
+	if _, err := os.Stat(parent); os.IsNotExist(err) {
+		if err := os.MkdirAll(parent, 0755); err != nil {
+			return nil, err
+		}
+	}
+
+	f, err := ioutil.TempFile(parent, "")
+	if err != nil {
+		return nil, fmt.Errorf("Failed to create temporary file for write at %v: %v", parent, err.Error())
+	}
+
+	if err := os.Chmod(f.Name(), defaultFilePerms); err != nil {
+		os.Remove(f.Name())
+		return nil, err
+	}
+
+	return f, nil
+}
+
+// Second step to an atomic file write for output files.
+// Should be called after the necessary content has been written to the temporary file returned by
+// setupOutput (above). Renames the temporary file to outputPath.
+func finalizeOutputFile(outputPath string, outFile *os.File) error {
+	if outputPath == "" {
+		return errors.New("no output file path specified")
+	}
+
+	if outFile == nil {
+		return fmt.Errorf("no output file specified")
+	}
+
+	// Commit file contents to stable storage before proceeding.
+	if err := outFile.Sync(); err != nil {
+		return fmt.Errorf("Failed to sync temporary file: %v", err.Error())
+	}
+
+	if err := outFile.Close(); err != nil {
+		return fmt.Errorf("Failed to close temporary file: %v", err.Error())
+	}
+
+	// Rename to provided output.
+	if err := os.Rename(outFile.Name(), outputPath); err != nil {
+		return fmt.Errorf("Failed to rename temporary file to output: %v", err.Error())
+	}
+
+	return nil
+}
 
 // encryptCmd handles CLI options for the encryption command.
 type encryptCmd struct {
@@ -137,34 +201,44 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		}
 	}
 
+	var outFile *os.File
+	var logFile *os.File
+
+	outputArg := f.Arg(1)
+	if outputArg == "-" {
+		// If output goes to stdout, use stderr for logging.
+		outFile = os.Stdout
+		logFile = os.Stderr
+	} else {
+		// For atomicity, create a temp file to write to.
+		outFile, err = setupOutputFile(outputArg)
+		if err != nil {
+			glog.Errorf("Failed to setup output %v: %v", outputArg, err.Error())
+			return subcommands.ExitFailure
+		}
+		defer os.Remove(outFile.Name())
+
+		logFile = os.Stdout
+	}
+
 	// Initialize StetClient and encrypt plaintext.
 	c := client.StetClient{
 		InsecureSkipVerify: e.insecureSkipVerify,
 		Version:            version,
 	}
 
-	var outFile *os.File
-	var logFile *os.File
-
-	if f.Arg(1) == "-" {
-		outFile = os.Stdout
-		logFile = os.Stderr
-	} else {
-
-		outFile, err = os.Create(f.Arg(1))
-		if err != nil {
-			glog.Errorf("Failed to open file for encrypted data: %v", err.Error())
-			return subcommands.ExitFailure
-		}
-		defer outFile.Close()
-
-		logFile = os.Stdout
-	}
-
 	md, err := c.Encrypt(ctx, inFile, outFile, stetConfig.GetEncryptConfig(), stetConfig.GetAsymmetricKeys(), e.blobID)
 	if err != nil {
 		glog.Errorf("Failed to encrypt plaintext: %v", err.Error())
 		return subcommands.ExitFailure
+	}
+
+	// If writing to a file (not stdout), rename the temp output file to the provided argument.
+	if outputArg != "-" {
+		if err := finalizeOutputFile(outputArg, outFile); err != nil {
+			glog.Errorf("Failed to finalize output: %v", err.Error())
+			return subcommands.ExitFailure
+		}
 	}
 
 	if !e.quiet {
@@ -276,12 +350,6 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		return subcommands.ExitFailure
 	}
 
-	// Initialize StetClient and decrypt plaintext.
-	c := client.StetClient{
-		InsecureSkipVerify: d.insecureSkipVerify,
-		Version:            version,
-	}
-
 	var inFile io.Reader
 
 	if f.Arg(0) == "-" {
@@ -298,25 +366,40 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 	var outFile *os.File
 	var logFile *os.File
 
-	if f.Arg(1) == "-" {
-		// Output to stdout and log to stderr.
+	outputArg := f.Arg(1)
+	if outputArg == "-" {
+		// If output goes to stdout, use stderr for logging.
 		outFile = os.Stdout
 		logFile = os.Stderr
 	} else {
-		outFile, err = os.Create(f.Arg(1))
+		outFile, err = setupOutputFile(outputArg)
 		if err != nil {
-			glog.Errorf("Failed to open file for plaintext: %v", err.Error())
+			glog.Errorf("Failed to setup output %v: %v", outputArg, err.Error())
 			return subcommands.ExitFailure
 		}
-		defer outFile.Close()
+		defer os.Remove(outFile.Name())
 
 		logFile = os.Stdout
+	}
+
+	// Initialize StetClient and decrypt plaintext.
+	c := client.StetClient{
+		InsecureSkipVerify: d.insecureSkipVerify,
+		Version:            version,
 	}
 
 	md, err := c.Decrypt(ctx, inFile, outFile, stetConfig.GetDecryptConfig(), stetConfig.GetAsymmetricKeys())
 	if err != nil {
 		glog.Errorf("Failed to decrypt ciphertext: %v", err.Error())
 		return subcommands.ExitFailure
+	}
+
+	// If writing to a file (not stdout), there is an extra step.
+	if outputArg != "-" {
+		if err := finalizeOutputFile(outputArg, outFile); err != nil {
+			glog.Errorf("Failed to write to output file: %v", err.Error())
+			return subcommands.ExitFailure
+		}
 	}
 
 	if !d.quiet {
@@ -349,7 +432,7 @@ func (*versionCmd) Execute(context.Context, *flag.FlagSet, ...interface{}) subco
 }
 
 func main() {
-	// If effective UID is 0 and real UID != 0, we invoked as user but need to descalate.
+	// If effective UID is 0 and real UID != 0, we invoked as user but need to deescalate.
 	euid := syscall.Geteuid()
 	ruid := syscall.Getuid()
 	if euid == 0 && ruid != 0 {
