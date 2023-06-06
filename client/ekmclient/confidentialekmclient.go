@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Defines an HTTP client for making requests to Confidential EKM services.
-
-package client
+// Package ekmclient defines an HTTP client for contacting Confidential EKM services.
+package ekmclient
 
 import (
 	"bytes"
@@ -47,15 +46,15 @@ const (
 // ConfidentialEKMClient is an HTTP client that has methods for making
 // requests to a server implementing the EKM UDE protocol.
 type ConfidentialEKMClient struct {
-	uri       string
-	authToken string
-	certPool  *x509.CertPool
+	URI       string
+	AuthToken string
+	CertPool  *x509.CertPool
 }
 
 // NewConfidentialEKMClient constructs a new ConfidentialEKMClient against
 // the given URI.
 func NewConfidentialEKMClient(uri string) ConfidentialEKMClient {
-	return ConfidentialEKMClient{uri: uri}
+	return ConfidentialEKMClient{URI: uri}
 }
 
 // Removes the last two path component from the key URI.
@@ -84,14 +83,14 @@ func (c ConfidentialEKMClient) post(ctx context.Context, url string, protoReq, p
 
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	if c.authToken != "" {
-		httpReq.Header.Set("Authorization", "Bearer "+c.authToken)
+	if c.AuthToken != "" {
+		httpReq.Header.Set("Authorization", "Bearer "+c.AuthToken)
 	}
 
 	client := http.Client{
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
-				RootCAs: c.certPool,
+				RootCAs: c.CertPool,
 			},
 		},
 	}
@@ -120,7 +119,7 @@ func (c ConfidentialEKMClient) post(ctx context.Context, url string, protoReq, p
 
 func (c ConfidentialEKMClient) BeginSession(ctx context.Context, req *sspb.BeginSessionRequest) (*sspb.BeginSessionResponse, error) {
 	resp := &sspb.BeginSessionResponse{}
-	url := removeEndpointPathComponent(c.uri) + beginSessionEndpoint
+	url := removeEndpointPathComponent(c.URI) + beginSessionEndpoint
 	if err := c.post(ctx, url, req, resp); err != nil {
 		return nil, err
 	}
@@ -133,7 +132,7 @@ func (c ConfidentialEKMClient) BeginSession(ctx context.Context, req *sspb.Begin
 
 func (c ConfidentialEKMClient) Handshake(ctx context.Context, req *sspb.HandshakeRequest) (*sspb.HandshakeResponse, error) {
 	resp := &sspb.HandshakeResponse{}
-	url := removeEndpointPathComponent(c.uri) + handshakeEndpoint
+	url := removeEndpointPathComponent(c.URI) + handshakeEndpoint
 	if err := c.post(ctx, url, req, resp); err != nil {
 		return nil, err
 	}
@@ -143,7 +142,7 @@ func (c ConfidentialEKMClient) Handshake(ctx context.Context, req *sspb.Handshak
 
 func (c ConfidentialEKMClient) NegotiateAttestation(ctx context.Context, req *sspb.NegotiateAttestationRequest) (*sspb.NegotiateAttestationResponse, error) {
 	resp := &sspb.NegotiateAttestationResponse{}
-	url := removeEndpointPathComponent(c.uri) + negotiateAttestationEndpoint
+	url := removeEndpointPathComponent(c.URI) + negotiateAttestationEndpoint
 	if err := c.post(ctx, url, req, resp); err != nil {
 		return nil, err
 	}
@@ -153,7 +152,7 @@ func (c ConfidentialEKMClient) NegotiateAttestation(ctx context.Context, req *ss
 
 func (c ConfidentialEKMClient) Finalize(ctx context.Context, req *sspb.FinalizeRequest) (*sspb.FinalizeResponse, error) {
 	resp := &sspb.FinalizeResponse{}
-	url := removeEndpointPathComponent(c.uri) + finalizeEndpoint
+	url := removeEndpointPathComponent(c.URI) + finalizeEndpoint
 	if err := c.post(ctx, url, req, resp); err != nil {
 		return nil, err
 	}
@@ -163,7 +162,7 @@ func (c ConfidentialEKMClient) Finalize(ctx context.Context, req *sspb.FinalizeR
 
 func (c ConfidentialEKMClient) EndSession(ctx context.Context, req *sspb.EndSessionRequest) (*sspb.EndSessionResponse, error) {
 	resp := &sspb.EndSessionResponse{}
-	url := removeEndpointPathComponent(c.uri) + endSessionEndpoint
+	url := removeEndpointPathComponent(c.URI) + endSessionEndpoint
 	if err := c.post(ctx, url, req, resp); err != nil {
 		return nil, err
 	}
@@ -173,7 +172,7 @@ func (c ConfidentialEKMClient) EndSession(ctx context.Context, req *sspb.EndSess
 
 func (c ConfidentialEKMClient) ConfidentialWrap(ctx context.Context, req *cwpb.ConfidentialWrapRequest) (*cwpb.ConfidentialWrapResponse, error) {
 	resp := &cwpb.ConfidentialWrapResponse{}
-	url := c.uri + confidentialWrapEndpoint
+	url := c.URI + confidentialWrapEndpoint
 	if err := c.post(ctx, url, req, resp); err != nil {
 		return nil, err
 	}
@@ -183,7 +182,7 @@ func (c ConfidentialEKMClient) ConfidentialWrap(ctx context.Context, req *cwpb.C
 
 func (c ConfidentialEKMClient) ConfidentialUnwrap(ctx context.Context, req *cwpb.ConfidentialUnwrapRequest) (*cwpb.ConfidentialUnwrapResponse, error) {
 	resp := &cwpb.ConfidentialUnwrapResponse{}
-	url := c.uri + confidentialUnwrapEndpoint
+	url := c.URI + confidentialUnwrapEndpoint
 	if err := c.post(ctx, url, req, resp); err != nil {
 		return nil, err
 	}

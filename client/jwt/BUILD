@@ -12,20 +12,20 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
-licenses(["notice"])
+package(
+    default_visibility = ["//:__subpackages__"],
+)
 
-package(default_visibility = ["//visibility:private"])
-
-go_binary(
-    name = "main",
-    srcs = ["main.go"],
+go_library(
+    name = "jwt",
+    srcs = ["jwt.go"],
+    importpath = "github.com/GoogleCloudPlatform/stet/client/jwt",
     deps = [
-        "//client/jwt",
-        "//client/securesession",
-        "//constants",
-        "//server",
-        "@com_github_golang_glog//:glog",
+        "@com_google_cloud_go//compute/metadata",
+        "@com_google_cloud_go//iam/credentials/apiv1:go_default_library",
+        "@go_googleapis//google/iam/credentials/v1:credentials_go_proto",
+        "@org_golang_x_oauth2//google:go_default_library",
     ],
 )

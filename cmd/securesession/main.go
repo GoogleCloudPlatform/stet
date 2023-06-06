@@ -22,7 +22,8 @@ import (
 	"net/url"
 
 	"flag"
-	"github.com/GoogleCloudPlatform/stet/client"
+	"github.com/GoogleCloudPlatform/stet/client/jwt"
+	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/constants"
 	"github.com/GoogleCloudPlatform/stet/server"
 	glog "github.com/golang/glog"
@@ -56,7 +57,7 @@ func main() {
 		}
 
 		var err error
-		if *authToken, err = client.GenerateJWT(ctx, *audience); err != nil {
+		if *authToken, err = jwt.GenerateJWT(ctx, *audience); err != nil {
 			glog.Exitf("Failed to generate new JWT: %v", err)
 		}
 		glog.Infof("Generated new JWT: %v", *authToken)
@@ -64,7 +65,7 @@ func main() {
 
 	glog.Infof("Attempting to connect to secure session server at %v.", *addr)
 
-	ssClient, err := client.EstablishSecureSession(ctx, *addr, *authToken, client.SkipTLSVerify(*skipTLSVerify))
+	ssClient, err := securesession.EstablishSecureSession(ctx, *addr, *authToken, securesession.SkipTLSVerify(*skipTLSVerify))
 	if err != nil {
 		glog.Exit(fmt.Sprintf("Error establishing secure session: %v", err.Error()))
 	}

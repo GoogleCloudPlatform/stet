@@ -4,7 +4,8 @@ go_binary(
     name = "main",
     srcs = ["main.go"],
     deps = [
-        "//client",
+        "//client/ekmclient",
+        "//client/securesession",
         "//constants",
         "//proto:attestation_evidence_go_proto",
         "//proto:confidential_wrap_go_proto",

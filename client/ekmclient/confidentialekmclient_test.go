@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package client
+package ekmclient
 
 import (
 	"context"
@@ -78,7 +78,7 @@ func TestPost(t *testing.T) {
 	certPool := x509.NewCertPool()
 	certPool.AddCert(ts.Certificate())
 
-	client := ConfidentialEKMClient{uri: ts.URL + placeholderEndpoint, authToken: authToken, certPool: certPool}
+	client := ConfidentialEKMClient{URI: ts.URL + placeholderEndpoint, AuthToken: authToken, CertPool: certPool}
 
 	resp := &sspb.BeginSessionResponse{}
 	if err := client.post(context.Background(), ts.URL, expectedReq, resp); err != nil {
@@ -178,7 +178,7 @@ func TestBeginSession(t *testing.T) {
 	ts, certPool := getTestServerAndCertPool(t, beginSessionEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &ConfidentialEKMClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
+	client := &ConfidentialEKMClient{URI: ts.URL + placeholderEndpoint, AuthToken: "", CertPool: certPool}
 
 	resp, err := client.BeginSession(context.Background(), &sspb.BeginSessionRequest{})
 	if err != nil {
@@ -196,7 +196,7 @@ func TestHandshake(t *testing.T) {
 	ts, certPool := getTestServerAndCertPool(t, handshakeEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &ConfidentialEKMClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
+	client := &ConfidentialEKMClient{URI: ts.URL + placeholderEndpoint, AuthToken: "", CertPool: certPool}
 
 	resp, err := client.Handshake(context.Background(), &sspb.HandshakeRequest{})
 	if err != nil {
@@ -214,7 +214,7 @@ func TestNegotiateAttestation(t *testing.T) {
 	ts, certPool := getTestServerAndCertPool(t, negotiateAttestationEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &ConfidentialEKMClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
+	client := &ConfidentialEKMClient{URI: ts.URL + placeholderEndpoint, AuthToken: "", CertPool: certPool}
 
 	resp, err := client.NegotiateAttestation(context.Background(), &sspb.NegotiateAttestationRequest{})
 	if err != nil {
@@ -232,7 +232,7 @@ func TestFinalize(t *testing.T) {
 	ts, certPool := getTestServerAndCertPool(t, finalizeEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &ConfidentialEKMClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
+	client := &ConfidentialEKMClient{URI: ts.URL + placeholderEndpoint, AuthToken: "", CertPool: certPool}
 
 	resp, err := client.Finalize(context.Background(), &sspb.FinalizeRequest{})
 	if err != nil {
@@ -250,7 +250,7 @@ func TestEndSession(t *testing.T) {
 	ts, certPool := getTestServerAndCertPool(t, endSessionEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &ConfidentialEKMClient{uri: ts.URL + placeholderEndpoint, authToken: "", certPool: certPool}
+	client := &ConfidentialEKMClient{URI: ts.URL + placeholderEndpoint, AuthToken: "", CertPool: certPool}
 
 	resp, err := client.EndSession(context.Background(), &sspb.EndSessionRequest{})
 	if err != nil {
@@ -271,7 +271,7 @@ func TestConfidentialWrap(t *testing.T) {
 	ts, certPool := getTestServerAndCertPool(t, "/endpoint/"+keyPath+confidentialWrapEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &ConfidentialEKMClient{uri: ts.URL + "/endpoint/" + keyPath, authToken: "", certPool: certPool}
+	client := &ConfidentialEKMClient{URI: ts.URL + "/endpoint/" + keyPath, AuthToken: "", CertPool: certPool}
 
 	resp, err := client.ConfidentialWrap(context.Background(),
 		&cwpb.ConfidentialWrapRequest{RequestMetadata: &cwpb.RequestMetadata{KeyPath: keyPath}})
@@ -294,7 +294,7 @@ func TestConfidentialUnwrap(t *testing.T) {
 	ts, certPool := getTestServerAndCertPool(t, "/endpoint/"+keyPath+confidentialUnwrapEndpoint, expectedResp)
 	defer ts.Close()
 
-	client := &ConfidentialEKMClient{uri: ts.URL + "/endpoint/" + keyPath, authToken: "", certPool: certPool}
+	client := &ConfidentialEKMClient{URI: ts.URL + "/endpoint/" + keyPath, AuthToken: "", CertPool: certPool}
 
 	resp, err := client.ConfidentialUnwrap(context.Background(),
 		&cwpb.ConfidentialUnwrapRequest{RequestMetadata: &cwpb.RequestMetadata{KeyPath: keyPath}})

@@ -24,7 +24,8 @@ import (
 	"strings"
 
 	"flag"
-	"github.com/GoogleCloudPlatform/stet/client"
+	"github.com/GoogleCloudPlatform/stet/client/ekmclient"
+	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/constants"
 	aepb "github.com/GoogleCloudPlatform/stet/proto/attestation_evidence_go_proto"
 	cwpb "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
@@ -53,7 +54,7 @@ const (
 )
 
 type ekmClient struct {
-	client client.ConfidentialEKMClient
+	client ekmclient.ConfidentialEKMClient
 	shim   transportshim.ShimInterface
 	tls    *tls.Conn
 }
@@ -62,7 +63,7 @@ type ekmClient struct {
 // cipher suites, also kicking off the internal TLS handshake.
 func newEKMClientWithSuites(keyURL string, cipherSuites []uint16) ekmClient {
 	c := ekmClient{}
-	c.client = client.NewConfidentialEKMClient(keyURL)
+	c.client = ekmclient.NewConfidentialEKMClient(keyURL)
 
 	c.shim = transportshim.NewTransportShim()
 
@@ -190,7 +191,7 @@ func runHandshakeTestCase(ctx context.Context, t handshakeTest) error {
 	if len(resp.GetTlsRecords()) > 0 {
 		records := resp.GetTlsRecords()
 
-		// The handshake data itself is encypted, so just verify that the
+		// The handshake data itself is encrypted, so just verify that the
 		// header for this segment of data is a handshake record.
 		if records[0] != recordHeaderHandshake {
 			return fmt.Errorf("Handshake record not received")
@@ -320,7 +321,7 @@ func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
 	// EstablishSecureSession() method from the `client` package (since it already has the complete
 	// logic for generating attestations, etc).
 	if t.fullAttestation {
-		_, err := client.EstablishSecureSession(ctx, *keyURI, "", client.SkipTLSVerify(true))
+		_, err := securesession.EstablishSecureSession(ctx, *keyURI, "", securesession.SkipTLSVerify(true))
 		return err
 	}
 

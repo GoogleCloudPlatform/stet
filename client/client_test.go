@@ -23,6 +23,8 @@ import (
 	"testing"
 
 	"cloud.google.com/go/kms/apiv1"
+	"github.com/GoogleCloudPlatform/stet/client/securesession"
+	"github.com/GoogleCloudPlatform/stet/client/shares"
 	"github.com/google/tink/go/subtle/random"
 	"github.com/googleapis/gax-go"
 	"google.golang.org/protobuf/proto"
@@ -65,7 +67,7 @@ func createEnabledCryptoKey(protectionLevel kmsrpb.ProtectionLevel) *kmsrpb.Cryp
 
 // Fake version of secure session client, used to communicate with external EKM.
 type fakeSecureSessionClient struct {
-	SecureSessionClient
+	securesession.SecureSessionClient
 
 	wrapErr       error
 	unwrapErr     error
@@ -563,7 +565,7 @@ func TestEkmSecureSessionUnwrapError(t *testing.T) {
 
 func TestWrapSharesIndividually(t *testing.T) {
 	testShare := []byte("I am a wrapped share.")
-	testHashedShare := HashShare(testShare)
+	testHashedShare := shares.HashShare(testShare)
 
 	testCases := []struct {
 		name            string
@@ -631,7 +633,7 @@ func TestWrapSharesIndividually(t *testing.T) {
 
 func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 	testShare := []byte("Foo!")
-	testHashedShare := HashShare(testShare)
+	testHashedShare := shares.HashShare(testShare)
 
 	ctx := context.Background()
 
@@ -692,7 +694,7 @@ func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 		t.Fatalf("unwrapAndValidateShares(ctx, %s, %v, %v) did not return the expected number of shares. Got %v, want 1", wrappedShares, ki, keys, len(unwrappedShares))
 	}
 
-	if !bytes.Equal(unwrappedShares[0].share, testShare) {
+	if !bytes.Equal(unwrappedShares[0].Share, testShare) {
 		t.Errorf("unwrapAndValidateShares(ctx, %s, %v, %v) did not return the expected unwrapped share. Got %v, want %v", testShare, ki, keys, unwrappedShares[0], testShare)
 	}
 }
@@ -976,7 +978,7 @@ func TestWrapSharesError(t *testing.T) {
 
 func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 	expectedUnwrappedShare := []byte("I am a wrapped share.")
-	expectedHashedShare := HashShare(expectedUnwrappedShare)
+	expectedHashedShare := shares.HashShare(expectedUnwrappedShare)
 
 	testCases := []struct {
 		name         string
@@ -1040,7 +1042,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 				t.Fatalf("unwrapAndValidateShares did not return the expected number of shares. Got %v, want %v", len(unwrappedShares), len(testCase.wrappedShare))
 			}
 
-			if !bytes.Equal(unwrappedShares[0].share, expectedUnwrappedShare) {
+			if !bytes.Equal(unwrappedShares[0].Share, expectedUnwrappedShare) {
 				t.Errorf("unwrapAndValidateShares did not return the expected unwrapped share. Got %v, want %v", unwrappedShares[0], testCase.wrappedShare)
 			}
 		})
@@ -1050,7 +1052,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 	// Create lists of shares and kekInfos of appropriate length.
 	share := []byte("expected unwrapped share")
-	shareHash := HashShare(share)
+	shareHash := shares.HashShare(share)
 	sharesList := [][]byte{share, share, share}
 	kekInfoList := []*configpb.KekInfo{
 		&configpb.KekInfo{
@@ -1102,7 +1104,7 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 	}
 
 	for i, unwrappedShare := range unwrapped {
-		if !bytes.Equal(unwrappedShare.share, sharesList[i]) {
+		if !bytes.Equal(unwrappedShare.Share, sharesList[i]) {
 			t.Errorf("unwrapAndValidateShares(context.Background(), %v, %v) did not return the expected wrapped share %v. Got %v, want %v", sharesList, kekInfoList, i, unwrappedShare, sharesList[i])
 		}
 	}
@@ -1114,7 +1116,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 	testUnwrappedShare := []byte("I am an unwrapped share")
 	testWrappedShare := &configpb.WrappedShare{
 		Share: fakeKMSWrap(testUnwrappedShare, testSoftwareKEKName),
-		Hash:  HashShare(testUnwrappedShare),
+		Hash:  shares.HashShare(testUnwrappedShare),
 	}
 
 	testCases := []struct {
@@ -1152,7 +1154,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			name: "Unwrapped share has an invalid hash",
 			wrappedShares: []*configpb.WrappedShare{&configpb.WrappedShare{
 				Share: fakeKMSWrap(testUnwrappedShare, testSoftwareKEKName),
-				Hash:  HashShare([]byte("I am a random different share")),
+				Hash:  shares.HashShare([]byte("I am a random different share")),
 			}},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
 				KekType: &configpb.KekInfo_KekUri{
@@ -1257,7 +1259,7 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 	}
 
 	for i, unwrappedShare := range unwrapped {
-		if !bytes.Equal(unwrappedShare.share, sharesList[i]) {
+		if !bytes.Equal(unwrappedShare.Share, sharesList[i]) {
 			t.Errorf("unwrapAndValidateShares(context.Background(), %v, %v, {}) = %v, want %v", sharesList, kekInfoList, unwrappedShare, sharesList[i])
 		}
 	}
@@ -1680,8 +1682,8 @@ func TestDecryptErrors(t *testing.T) {
 
 	// Create test shares and corresponding hashes.
 	testShare := []byte("I am a wrapped share.")
-	testHashedShare := HashShare(testShare)
-	testInvalidHashedShare := HashShare([]byte("I am a different share."))
+	testHashedShare := shares.HashShare(testShare)
+	testInvalidHashedShare := shares.HashShare([]byte("I am a different share."))
 
 	wrapped := &configpb.WrappedShare{
 		Share: append(testShare, byte('E')),
@@ -1786,7 +1788,7 @@ func TestDecryptErrors(t *testing.T) {
 			}
 
 			var input bytes.Buffer
-			if err := writeHeader(&input, len(metadataBytes)); err != nil {
+			if err := WriteSTETHeader(&input, len(metadataBytes)); err != nil {
 				t.Fatalf("Failed to write STET encrypted file header: %v", err)
 			}
 			if _, err := input.Write(metadataBytes); err != nil {

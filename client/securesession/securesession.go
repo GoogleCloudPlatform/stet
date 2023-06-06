@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Defines a client for making RPC calls to the SecureSession service.
-
-package client
+// Package securesession defines a client for making RPC calls to the SecureSession service.
+package securesession
 
 import (
 	"context"
@@ -26,6 +25,7 @@ import (
 	"syscall"
 
 	"cloud.google.com/go/compute/metadata"
+	"github.com/GoogleCloudPlatform/stet/client/ekmclient"
 	tpmclient "github.com/google/go-tpm-tools/client"
 	atpb "github.com/google/go-tpm-tools/proto/attest"
 	"github.com/google/go-tpm/tpm2"
@@ -77,7 +77,7 @@ func (ekmToken) RequireTransportSecurity() bool {
 
 // SecureSessionClient is a SecureSession service client.
 type SecureSessionClient struct {
-	client           ConfidentialEKMClient
+	client           ekmclient.ConfidentialEKMClient
 	shim             transportshim.ShimInterface
 	tls              *tls.Conn
 	state            clientState
@@ -192,7 +192,7 @@ func EstablishSecureSession(ctx context.Context, addr, authToken string, opts ..
 func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool, skipTLSVerify bool) (*SecureSessionClient, error) {
 	c := &SecureSessionClient{}
 
-	c.client = ConfidentialEKMClient{uri: addr, authToken: authToken, certPool: httpCertPool}
+	c.client = ekmclient.ConfidentialEKMClient{URI: addr, AuthToken: authToken, CertPool: httpCertPool}
 	c.shim = transportshim.NewTransportShim()
 
 	cfg := &tls.Config{
@@ -372,7 +372,7 @@ func (c *SecureSessionClient) addTpmEvidence(evidence *aepb.AttestationEvidence)
 
 	defer ek.Close()
 
-	// Resolve the most recent supported nonce type from the server's repsonse.
+	// Resolve the most recent supported nonce type from the server's response.
 	preferredNonceTypes := []aepb.NonceType{
 		aepb.NonceType_NONCE_EKM32,
 	}

@@ -12,20 +12,26 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@io_bazel_rules_go//go:def.bzl", "go_binary")
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
-licenses(["notice"])
+package(
+    default_visibility = ["//:__subpackages__"],
+)
 
-package(default_visibility = ["//visibility:private"])
-
-go_binary(
-    name = "main",
-    srcs = ["main.go"],
+go_library(
+    name = "shares",
+    srcs = ["shares.go"],
+    importpath = "github.com/GoogleCloudPlatform/stet/client/shares",
     deps = [
-        "//client/jwt",
-        "//client/securesession",
-        "//constants",
-        "//server",
-        "@com_github_golang_glog//:glog",
+        "//proto:config_go_proto",
+        "@com_github_google_tink_go//subtle/random:go_default_library",
+        "@com_github_hashicorp_vault//:shamir",
     ],
+)
+
+go_test(
+    name = "shares_test",
+    srcs = ["shares_test.go"],
+    embed = [":shares"],
+    deps = ["@com_github_google_tink_go//subtle/random:go_default_library"],
 )

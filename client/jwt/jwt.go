@@ -12,9 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Utility functions for generating JWTs from a service account.
-
-package client
+// Package jwt contains utility functions for generating JWTs from a service account.
+package jwt
 
 import (
 	"context"
@@ -44,8 +43,9 @@ func instanceIdentityToken(audience string) (string, error) {
 	return metadata.Get(fmt.Sprintf(instanceIdentityURL, audience))
 }
 
-// Generates an JWT with the FQDN of the given address as its audience.
-func generateTokenFromEKMAddress(ctx context.Context, address string) (string, error) {
+// GenerateTokenWithAudience generates a JWT with the FQDN of the given
+// address as its audience.
+func GenerateTokenWithAudience(ctx context.Context, address string) (string, error) {
 	u, err := url.Parse(address)
 	if err != nil {
 		return "", fmt.Errorf("could not parse EKM address: %v", err)
