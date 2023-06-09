@@ -19,7 +19,10 @@ load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
 
 licenses(["notice"])
 
-package(default_visibility = ["//visibility:private"])
+package(
+    default_applicable_licenses = ["//:license"],
+    default_visibility = ["//visibility:private"],
+)
 
 proto_library(
     name = "attestation_evidence_proto",

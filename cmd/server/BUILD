@@ -16,7 +16,10 @@ load("@io_bazel_rules_go//go:def.bzl", "go_binary")
 
 licenses(["notice"])
 
-package(default_visibility = ["//visibility:private"])
+package(
+    default_applicable_licenses = ["//:license"],
+    default_visibility = ["//visibility:private"],
+)
 
 go_binary(
     name = "main",
