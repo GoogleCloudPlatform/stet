@@ -242,7 +242,11 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 	}
 
 	if !e.quiet {
-		logFile.WriteString(fmt.Sprintln("Wrote encrypted data to", outFile.Name()))
+		if outputArg == "-" {
+			outputArg = os.Stdout.Name()
+		}
+
+		logFile.WriteString(fmt.Sprintln("Wrote encrypted data to", outputArg))
 
 		// Debug information to guard against authorship attacks.
 		logFile.WriteString(fmt.Sprintln("Blob ID of encrypted data:", md.BlobID))
@@ -403,7 +407,11 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 	}
 
 	if !d.quiet {
-		logFile.WriteString(fmt.Sprintln("Wrote plaintext to", outFile.Name()))
+		if outputArg == "-" {
+			outputArg = os.Stdout.Name()
+		}
+
+		logFile.WriteString(fmt.Sprintln("Wrote plaintext to", outputArg))
 
 		// Debug information to guard against authorship attacks.
 		logFile.WriteString(fmt.Sprintln("Blob ID of decrypted data:", md.BlobID))
