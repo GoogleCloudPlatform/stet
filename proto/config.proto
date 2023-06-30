@@ -82,6 +82,8 @@ message StetConfig {
   EncryptConfig encrypt_config = 1;
   DecryptConfig decrypt_config = 2;
   AsymmetricKeys asymmetric_keys = 3;
+  // Specifies fields for running in Confidential Space. Optional.
+  ConfidentialSpaceConfigs confidential_space_configs = 4;
 }
 
 message EncryptConfig {
@@ -119,4 +121,33 @@ message WrappedShare {
 
   // The SHA-256 hash of the actual (unwrapped) share. Required.
   bytes hash = 2;
+}
+
+enum CredentialMode {
+  DEFAULT_ENCRYPT_AND_DECRYPT_MODE = 0;
+  ENCRYPT_ONLY_MODE = 1;
+  DECRYPT_ONLY_MODE = 2;
+}
+
+message KekCredentialConfig {
+  // A regex pattern representing the key URIs this config should be used to
+  // access. Required.
+  string kek_uri_pattern = 1;
+
+  // Identifier of the credential config WIP. Should be of the format
+  // "projects/*/locations/*/workloadIdentityPools/*/providers/*". Required.
+  string wip_name = 2;
+
+  // Email of the credential config service account. Optional.
+  string service_account = 3;
+
+  // Indicates whether this credential config is used for encryption and/or
+  // decryption. Defaults to ENCRYPT_AND_DECRYPT.
+  CredentialMode mode = 4;
+}
+
+message ConfidentialSpaceConfigs {
+  // A list of KekCredentialConfigs representing available credentials for
+  // accessing KEKs. Required.
+  repeated KekCredentialConfig kek_credentials = 1;
 }
