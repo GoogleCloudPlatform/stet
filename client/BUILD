@@ -15,6 +15,7 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 package(
+    default_applicable_licenses = ["//:license"],
     default_visibility = ["//:__subpackages__"],
 )
 
