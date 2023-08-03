@@ -202,8 +202,8 @@ go_repository(
 go_repository(
     name = "com_github_google_go_tpm_tools",
     importpath = "github.com/google/go-tpm-tools",
-    sum = "h1:AFlmenDrIe0WU5AvpbfGFOLprTJTg/fCwmTyFdDEjbM=",
-    version = "v0.3.1",
+    sum = "h1:EkMRDnvDt+hCux/gZTgk+tYmKhp5Crt2AEDjGCyKoXE=",
+    version = "v0.3.3",
     patches = [
         "patches/go-tpm-tools/BUILD.patch",
         "patches/go-tpm-tools/attest.proto.patch",
@@ -214,16 +214,16 @@ go_repository(
 go_repository(
     name = "com_github_google_go_tpm",
     importpath = "github.com/google/go-tpm",
-    sum = "h1:3iQQ2dlEf+1no7CLlfLPYzxhQy7j2G/emBqU5okydaw=",
-    version = "v0.3.2",
+    sum = "h1:P/ZFNBZYXRxc+z7i5uyd8VP7MaDteuLZInzrH2idRGo=",
+    version = "v0.3.3",
 )
 
 # Needed for com_github_google_go_tpm_tools.
 go_repository(
     name = "com_github_google_go_attestation",
     importpath = "github.com/google/go-attestation",
-    sum = "h1:MVYgi3XW4Ix0+2sEcJGNVNbxZFE56VjStrmtmYtE8Jo=",
-    version = "v0.3.2",
+    sum = "h1:hHhPfym1TZm88L7sWmdc/moikHt80ls6mEiU+QvhRvk=",
+    version = "v0.4.3",
 )
 
 # Needed for com_github_google_go_attestation.

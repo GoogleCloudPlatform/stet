@@ -26,7 +26,7 @@ import (
 	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/client/shares"
 	"github.com/google/tink/go/subtle/random"
-	"github.com/googleapis/gax-go"
+	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/protobuf/proto"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 

@@ -34,7 +34,7 @@ import (
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	glog "github.com/golang/glog"
 	"github.com/google/uuid"
-	"github.com/googleapis/gax-go"
+	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/api/option"
 	rpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	spb "google.golang.org/genproto/googleapis/cloud/kms/v1"
