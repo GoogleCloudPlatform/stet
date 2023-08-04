@@ -26,6 +26,7 @@ import (
 	ssgrpc "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	sspb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
@@ -48,7 +49,7 @@ type ekmToken struct {
 
 func (t ekmToken) GetRequestMetadata(context.Context, ...string) (map[string]string, error) {
 	return map[string]string{
-		"Authorization": fmt.Sprintf("Bearer %s", t.token),
+		TokenMetadataKey: fmt.Sprintf("%s%s", TokenPrefix, t.token),
 	}, nil
 }
 
@@ -90,28 +91,29 @@ func NewSecureSessionHTTPServiceWithFakeClients(address, authToken string, sessi
 	return srv, nil
 }
 
-func processHTTPRequest(httpReq *http.Request, protoReq proto.Message) error {
+func processHTTPRequest(ctx context.Context, httpReq *http.Request, protoReq proto.Message) (context.Context, error) {
 	defer httpReq.Body.Close()
 	reqBody, err := ioutil.ReadAll(httpReq.Body)
 	if err != nil {
-		return fmt.Errorf("unable to read HTTP request body: %w", err)
+		return ctx, fmt.Errorf("unable to read HTTP request body: %w", err)
 	}
 
 	if err = protojson.Unmarshal(reqBody, protoReq); err != nil {
-		return fmt.Errorf("unable to unmarshal HTTP request body: %w", err)
+		return ctx, fmt.Errorf("unable to unmarshal HTTP request body: %w", err)
 	}
 
-	return nil
+	return metadata.AppendToOutgoingContext(ctx, TokenMetadataKey, httpReq.Header.Get(TokenMetadataKey)), nil
 }
 
-func (s *SecureSessionHTTPService) handleBeginSession(w http.ResponseWriter, r *http.Request) {
+func (s *SecureSessionHTTPService) handleBeginSession(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	req := &sspb.BeginSessionRequest{}
-	if err := processHTTPRequest(r, req); err != nil {
+	reqCtx, err := processHTTPRequest(ctx, r, req)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
 	}
 
-	resp, err := s.sessionClient.BeginSession(r.Context(), req)
+	resp, err := s.sessionClient.BeginSession(reqCtx, req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -126,14 +128,15 @@ func (s *SecureSessionHTTPService) handleBeginSession(w http.ResponseWriter, r *
 	w.Write(marshaled)
 }
 
-func (s *SecureSessionHTTPService) handleHandshake(w http.ResponseWriter, r *http.Request) {
+func (s *SecureSessionHTTPService) handleHandshake(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	req := &sspb.HandshakeRequest{}
-	if err := processHTTPRequest(r, req); err != nil {
+	reqCtx, err := processHTTPRequest(ctx, r, req)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 		w.Write([]byte(err.Error()))
 	}
 
-	resp, err := s.sessionClient.Handshake(r.Context(), req)
+	resp, err := s.sessionClient.Handshake(reqCtx, req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -148,13 +151,14 @@ func (s *SecureSessionHTTPService) handleHandshake(w http.ResponseWriter, r *htt
 	w.Write(marshaled)
 }
 
-func (s *SecureSessionHTTPService) handleNegotiateAttestation(w http.ResponseWriter, r *http.Request) {
+func (s *SecureSessionHTTPService) handleNegotiateAttestation(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	req := &sspb.NegotiateAttestationRequest{}
-	if err := processHTTPRequest(r, req); err != nil {
+	reqCtx, err := processHTTPRequest(ctx, r, req)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 	}
 
-	resp, err := s.sessionClient.NegotiateAttestation(r.Context(), req)
+	resp, err := s.sessionClient.NegotiateAttestation(reqCtx, req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -169,13 +173,14 @@ func (s *SecureSessionHTTPService) handleNegotiateAttestation(w http.ResponseWri
 	w.Write(marshaled)
 }
 
-func (s *SecureSessionHTTPService) handleFinalize(w http.ResponseWriter, r *http.Request) {
+func (s *SecureSessionHTTPService) handleFinalize(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	req := &sspb.FinalizeRequest{}
-	if err := processHTTPRequest(r, req); err != nil {
+	reqCtx, err := processHTTPRequest(ctx, r, req)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 	}
 
-	resp, err := s.sessionClient.Finalize(r.Context(), req)
+	resp, err := s.sessionClient.Finalize(reqCtx, req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -190,13 +195,14 @@ func (s *SecureSessionHTTPService) handleFinalize(w http.ResponseWriter, r *http
 	w.Write(marshaled)
 }
 
-func (s *SecureSessionHTTPService) handleEndSession(w http.ResponseWriter, r *http.Request) {
+func (s *SecureSessionHTTPService) handleEndSession(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	req := &sspb.EndSessionRequest{}
-	if err := processHTTPRequest(r, req); err != nil {
+	reqCtx, err := processHTTPRequest(ctx, r, req)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 	}
 
-	resp, err := s.sessionClient.EndSession(r.Context(), req)
+	resp, err := s.sessionClient.EndSession(reqCtx, req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -211,13 +217,14 @@ func (s *SecureSessionHTTPService) handleEndSession(w http.ResponseWriter, r *ht
 	w.Write(marshaled)
 }
 
-func (s *SecureSessionHTTPService) handleConfidentialWrap(w http.ResponseWriter, r *http.Request) {
+func (s *SecureSessionHTTPService) handleConfidentialWrap(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	req := &cwpb.ConfidentialWrapRequest{}
-	if err := processHTTPRequest(r, req); err != nil {
+	reqCtx, err := processHTTPRequest(ctx, r, req)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 	}
 
-	resp, err := s.wrapClient.ConfidentialWrap(r.Context(), req)
+	resp, err := s.wrapClient.ConfidentialWrap(reqCtx, req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -232,13 +239,14 @@ func (s *SecureSessionHTTPService) handleConfidentialWrap(w http.ResponseWriter,
 	w.Write(marshaled)
 }
 
-func (s *SecureSessionHTTPService) handleConfidentialUnwrap(w http.ResponseWriter, r *http.Request) {
+func (s *SecureSessionHTTPService) handleConfidentialUnwrap(ctx context.Context, w http.ResponseWriter, r *http.Request) {
 	req := &cwpb.ConfidentialUnwrapRequest{}
-	if err := processHTTPRequest(r, req); err != nil {
+	reqCtx, err := processHTTPRequest(ctx, r, req)
+	if err != nil {
 		w.WriteHeader(http.StatusBadRequest)
 	}
 
-	resp, err := s.wrapClient.ConfidentialUnwrap(r.Context(), req)
+	resp, err := s.wrapClient.ConfidentialUnwrap(reqCtx, req)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(err.Error()))
@@ -257,20 +265,21 @@ func (s *SecureSessionHTTPService) handleConfidentialUnwrap(w http.ResponseWrite
 func (s *SecureSessionHTTPService) Handler(w http.ResponseWriter, r *http.Request) {
 	endpoint := r.URL.String()
 
+	ctx := r.Context()
 	if strings.HasSuffix(endpoint, beginSessionEndpoint) {
-		s.handleBeginSession(w, r)
+		s.handleBeginSession(ctx, w, r)
 	} else if strings.HasSuffix(endpoint, handshakeEndpoint) {
-		s.handleHandshake(w, r)
+		s.handleHandshake(ctx, w, r)
 	} else if strings.HasSuffix(endpoint, negotiateAttestationEndpoint) {
-		s.handleNegotiateAttestation(w, r)
+		s.handleNegotiateAttestation(ctx, w, r)
 	} else if strings.HasSuffix(endpoint, finalizeEndpoint) {
-		s.handleFinalize(w, r)
+		s.handleFinalize(ctx, w, r)
 	} else if strings.HasSuffix(endpoint, endSessionEndpoint) {
-		s.handleEndSession(w, r)
+		s.handleEndSession(ctx, w, r)
 	} else if strings.HasSuffix(endpoint, confidentialWrapEndpoint) {
-		s.handleConfidentialWrap(w, r)
+		s.handleConfidentialWrap(ctx, w, r)
 	} else if strings.HasSuffix(endpoint, confidentialUnwrapEndpoint) {
-		s.handleConfidentialUnwrap(w, r)
+		s.handleConfidentialUnwrap(ctx, w, r)
 	} else {
 		// If no match found, respond with error.
 		w.WriteHeader(http.StatusBadRequest)

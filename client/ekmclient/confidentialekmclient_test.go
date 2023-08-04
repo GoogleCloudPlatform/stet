@@ -306,3 +306,25 @@ func TestConfidentialUnwrap(t *testing.T) {
 		t.Errorf("ConfidentialUnwrap(ctx, req) = %v, want %v", resp, expectedResp)
 	}
 }
+
+func TestGetJWTToken(t *testing.T) {
+	expectedToken := "test token"
+	client := &ConfidentialEKMClient{
+		AuthToken: expectedToken,
+	}
+
+	if token := client.GetJWTToken(); token != expectedToken {
+		t.Errorf("GetJWTToken() = %s, want %s", token, expectedToken)
+	}
+}
+
+func TestSetJWTToken(t *testing.T) {
+	expectedToken := "test token"
+	client := NewConfidentialEKMClient("test uri")
+
+	client.SetJWTToken(expectedToken)
+
+	if token := client.AuthToken; token != expectedToken {
+		t.Errorf("GetJWTToken() = %s, want %s", token, expectedToken)
+	}
+}

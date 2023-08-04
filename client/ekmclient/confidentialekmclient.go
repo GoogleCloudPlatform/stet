@@ -57,6 +57,18 @@ func NewConfidentialEKMClient(uri string) ConfidentialEKMClient {
 	return ConfidentialEKMClient{URI: uri}
 }
 
+// GetJWTToken gets the JWT associated with the client.
+// Test-only method.
+func (c ConfidentialEKMClient) GetJWTToken() string {
+	return c.AuthToken
+}
+
+// SetJWTToken sets the JWT associated with the client.
+// Test-only method.
+func (c *ConfidentialEKMClient) SetJWTToken(token string) {
+	c.AuthToken = token
+}
+
 // Removes the last two path component from the key URI.
 func removeEndpointPathComponent(url string) string {
 	for i := 0; i < 2; i++ {

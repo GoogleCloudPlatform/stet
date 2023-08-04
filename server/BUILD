@@ -40,7 +40,9 @@ go_library(
         "@com_github_google_go_tpm_tools//server:go_default_library",
         "@com_github_google_uuid//:uuid",
         "@org_golang_google_api//compute/v1:go_default_library",
+        "@org_golang_google_api//idtoken:go_default_library",
         "@org_golang_google_grpc//:grpc",
+        "@org_golang_google_grpc//metadata",
         "@org_golang_google_protobuf//encoding/protojson",
         "@org_golang_google_protobuf//proto",
     ],
@@ -55,5 +57,7 @@ go_test(
     embed = [":server"],
     deps = [
         "//proto:secure_session_go_proto",
+        "@org_golang_google_api//idtoken:go_default_library",
+        "@org_golang_google_grpc//metadata",
     ],
 )

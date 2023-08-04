@@ -19,12 +19,16 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"encoding/base64"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
+	"cloud.google.com/go/kms/apiv1"
 	"flag"
 	"github.com/GoogleCloudPlatform/stet/client/ekmclient"
+	"github.com/GoogleCloudPlatform/stet/client/jwt"
 	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/constants"
 	aepb "github.com/GoogleCloudPlatform/stet/proto/attestation_evidence_go_proto"
@@ -33,14 +37,24 @@ import (
 	"github.com/GoogleCloudPlatform/stet/server"
 	"github.com/GoogleCloudPlatform/stet/transportshim"
 	"github.com/alecthomas/colour"
+	glog "github.com/golang/glog"
 	apb "github.com/google/go-tpm-tools/proto/attest"
 	"github.com/google/go-tpm/tpm2"
+	rpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
+	spb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	"google.golang.org/protobuf/proto"
 )
 
+const (
+	defaultKeyResourceName          = "myresource"
+	defaultProtectedKeyResourceName = "myprotectedresource"
+)
+
 var (
-	keyURI          = flag.String("key-uri", fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath1), "A valid key URI stored in the server not protected by CC attestation")
-	protectedKeyURI = flag.String("protected-key-uri", fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath2), "A valid key URI stored in the server requiring CC attestation")
+	unprotectedKeyResourceName = flag.String("unprotected-resource-name", defaultKeyResourceName, "CloudKMS resource name of an external key not protected by CC attestation")
+	protectedKeyResourceName   = flag.String("protected-resource-name", defaultProtectedKeyResourceName, "CloudKMS resource name of an external key protected by CC attestation")
+	unprotectedKeyURI          string
+	protectedKeyURI            string
 )
 
 // recordBufferSize is the number of bytes allocated to buffers when reading
@@ -59,11 +73,43 @@ type ekmClient struct {
 	tls    *tls.Conn
 }
 
+// Encode JWT specific base64url encoding with padding stripped
+func encodeSegment(seg []byte) string {
+	return strings.TrimRight(base64.URLEncoding.EncodeToString(seg), "=")
+}
+
+// Decode JWT specific base64url encoding with padding stripped
+func decodeSegment(seg string) ([]byte, error) {
+	if l := len(seg) % 4; l > 0 {
+		seg += strings.Repeat("=", 4-l)
+	}
+
+	return base64.URLEncoding.DecodeString(seg)
+}
+
+func createAuthToken(ctx context.Context, keyURL string) (string, error) {
+	u, err := url.Parse(keyURL)
+	if err != nil {
+		glog.Fatalf("Could not parse key URL (%v): %v", keyURL, err)
+	}
+
+	audience := fmt.Sprintf("%v://%v", u.Scheme, u.Hostname())
+	return jwt.GenerateJWT(ctx, audience)
+}
+
 // Initializes a new EKM client against the given key URL with the given
 // cipher suites, also kicking off the internal TLS handshake.
-func newEKMClientWithSuites(keyURL string, cipherSuites []uint16) ekmClient {
-	c := ekmClient{}
-	c.client = ekmclient.NewConfidentialEKMClient(keyURL)
+func newEKMClientWithSuites(ctx context.Context, keyURL string, cipherSuites []uint16) ekmClient {
+	c := ekmClient{
+		client: ekmclient.NewConfidentialEKMClient(keyURL),
+	}
+
+	token, err := createAuthToken(ctx, keyURL)
+	if err != nil {
+		glog.Fatalf("Error generating JWT: %v", err)
+	}
+
+	c.client.SetJWTToken(token)
 
 	c.shim = transportshim.NewTransportShim()
 
@@ -85,26 +131,42 @@ func newEKMClientWithSuites(keyURL string, cipherSuites []uint16) ekmClient {
 	return c
 }
 
-func newEKMClient(keyURL string) ekmClient {
-	return newEKMClientWithSuites(keyURL, constants.AllowableCipherSuites)
+func newEKMClient(ctx context.Context, keyURL string) ekmClient {
+	return newEKMClientWithSuites(ctx, keyURL, constants.AllowableCipherSuites)
 }
 
 // Returns an empty byte array.
 func emptyFn([]byte) []byte { return []byte{} }
 
+func invalidateJwtSignature(_ context.Context, token string) (string, error) {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return "", fmt.Errorf("Error splitting token %s", token)
+	}
+	sig, _ := decodeSegment(parts[2])
+	sig[len(sig)-1] ^= 1
+	parts[2] = encodeSegment(sig)
+	return strings.Join(parts, "."), nil
+}
+
+func badAudience(ctx context.Context, token string) (string, error) {
+	return jwt.GenerateJWT(ctx, "https://dogs-in-the-office.com")
+}
+
 type beginSessionTest struct {
 	testName         string
 	expectErr        bool
 	mutateTLSRecords func(r []byte) []byte
+	mutateJWT        func(context.Context, string) (string, error)
 	altCipherSuites  []uint16
 }
 
 func runBeginSessionTestCase(ctx context.Context, t beginSessionTest) error {
 	var c ekmClient
 	if t.altCipherSuites != nil {
-		c = newEKMClientWithSuites(*keyURI, t.altCipherSuites)
+		c = newEKMClientWithSuites(ctx, unprotectedKeyURI, t.altCipherSuites)
 	} else {
-		c = newEKMClient(*keyURI)
+		c = newEKMClient(ctx, unprotectedKeyURI)
 	}
 
 	req := &sspb.BeginSessionRequest{
@@ -117,6 +179,14 @@ func runBeginSessionTestCase(ctx context.Context, t beginSessionTest) error {
 		records = t.mutateTLSRecords(records)
 	}
 	req.TlsRecords = records
+
+	if t.mutateJWT != nil {
+		newToken, err := t.mutateJWT(ctx, c.client.GetJWTToken())
+		if err != nil {
+			glog.Fatalf("Error mutating JWT: %v", err)
+		}
+		c.client.SetJWTToken(newToken)
+	}
 
 	resp, err := c.client.BeginSession(ctx, req)
 	if err != nil {
@@ -147,10 +217,11 @@ type handshakeTest struct {
 	expectErr        bool
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
+	mutateJWT        func(context.Context, string) (string, error)
 }
 
 func runHandshakeTestCase(ctx context.Context, t handshakeTest) error {
-	c := newEKMClient(*keyURI)
+	c := newEKMClient(ctx, unprotectedKeyURI)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -171,6 +242,14 @@ func runHandshakeTestCase(ctx context.Context, t handshakeTest) error {
 	records := c.shim.DrainSendBuf()
 	if t.mutateTLSRecords != nil {
 		records = t.mutateTLSRecords(records)
+	}
+
+	if t.mutateJWT != nil {
+		newToken, err := t.mutateJWT(ctx, c.client.GetJWTToken())
+		if err != nil {
+			glog.Fatalf("Error mutating JWT: %v", err)
+		}
+		c.client.SetJWTToken(newToken)
 	}
 
 	req2 := &sspb.HandshakeRequest{
@@ -208,10 +287,11 @@ type negotiateAttestationTest struct {
 	nonceTypes       []aepb.NonceType
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
+	mutateJWT        func(context.Context, string) (string, error)
 }
 
 func runNegotiateAttestationTestCase(ctx context.Context, t negotiateAttestationTest) (*aepb.AttestationEvidenceTypeList, error) {
-	c := newEKMClient(*keyURI)
+	c := newEKMClient(ctx, unprotectedKeyURI)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -269,6 +349,14 @@ func runNegotiateAttestationTestCase(ctx context.Context, t negotiateAttestation
 		OfferedEvidenceTypesRecords: offeredEvidenceTypeRecords,
 	}
 
+	if t.mutateJWT != nil {
+		newToken, err := t.mutateJWT(ctx, c.client.GetJWTToken())
+		if err != nil {
+			glog.Fatalf("Error mutating JWT: %v", err)
+		}
+		c.client.SetJWTToken(newToken)
+	}
+
 	resp3, err := c.client.NegotiateAttestation(ctx, req3)
 	if err != nil {
 		return nil, err
@@ -307,13 +395,14 @@ func runNegotiateAttestationTestCase(ctx context.Context, t negotiateAttestation
 
 type finalizeTest struct {
 	testName         string
-	fullAttestation  bool
 	expectErr        bool
+	fullAttestation  bool
 	evidenceTypes    []aepb.AttestationEvidenceType
 	nonceTypes       []aepb.NonceType
 	mockAttestation  *apb.Attestation
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
+	mutateJWT        func(context.Context, string) (string, error)
 }
 
 func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
@@ -321,11 +410,16 @@ func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
 	// EstablishSecureSession() method from the `client` package (since it already has the complete
 	// logic for generating attestations, etc).
 	if t.fullAttestation {
-		_, err := securesession.EstablishSecureSession(ctx, *keyURI, "", securesession.SkipTLSVerify(true))
+		token, err := createAuthToken(ctx, unprotectedKeyURI)
+		if err != nil {
+			return fmt.Errorf("Error generating JWT: %v", err)
+		}
+
+		_, err = securesession.EstablishSecureSession(ctx, unprotectedKeyURI, token, securesession.SkipTLSVerify(true))
 		return err
 	}
 
-	c := newEKMClient(*keyURI)
+	c := newEKMClient(ctx, unprotectedKeyURI)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -440,6 +534,14 @@ func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
 		req4.AttestationEvidenceRecords = records
 	}
 
+	if t.mutateJWT != nil {
+		newToken, err := t.mutateJWT(ctx, c.client.GetJWTToken())
+		if err != nil {
+			glog.Fatalf("Error mutating JWT: %v", err)
+		}
+		c.client.SetJWTToken(newToken)
+	}
+
 	if _, err := c.client.Finalize(ctx, req4); err != nil {
 		return err
 	}
@@ -449,7 +551,7 @@ func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
 
 // Establishes a secure session, returning the ekmClient and session context.
 func establishSecureSessionWithNullAttestation(ctx context.Context) (*ekmClient, []byte, error) {
-	c := newEKMClient(*keyURI)
+	c := newEKMClient(ctx, unprotectedKeyURI)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -564,6 +666,7 @@ type endSessionTest struct {
 	expectErr        bool
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
+	mutateJWT        func(context.Context, string) (string, error)
 }
 
 func runEndSessionTestCase(ctx context.Context, t endSessionTest) error {
@@ -591,6 +694,14 @@ func runEndSessionTestCase(ctx context.Context, t endSessionTest) error {
 		TlsRecords:     records,
 	}
 
+	if t.mutateJWT != nil {
+		newToken, err := t.mutateJWT(ctx, c.client.GetJWTToken())
+		if err != nil {
+			glog.Fatalf("Error mutating JWT: %v", err)
+		}
+		c.client.SetJWTToken(newToken)
+	}
+
 	_, err = c.client.EndSession(ctx, req5)
 	return err
 }
@@ -603,6 +714,7 @@ type confidentialWrapUnwrapTest struct {
 	closeSession     bool
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
+	mutateJWT        func(context.Context, string) (string, error)
 }
 
 func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTest) error {
@@ -637,7 +749,7 @@ func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTe
 			KeyPath:   t.keyPath,
 			Plaintext: []byte{0x01},
 			AdditionalContext: &cwpb.RequestContext{
-				RelativeResourceName: "myresource",
+				RelativeResourceName: *unprotectedKeyResourceName,
 				AccessReasonContext:  &cwpb.AccessReasonContext{Reason: cwpb.AccessReasonContext_CUSTOMER_INITIATED_ACCESS},
 			},
 			AdditionalAuthenticatedData: nil,
@@ -666,6 +778,14 @@ func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTe
 				KeyUriPrefix:      wrapReq.GetKeyUriPrefix(),
 				AdditionalContext: wrapReq.GetAdditionalContext(),
 			},
+		}
+
+		if t.mutateJWT != nil {
+			newToken, err := t.mutateJWT(ctx, c.client.GetJWTToken())
+			if err != nil {
+				glog.Fatalf("Error mutating JWT: %v", err)
+			}
+			c.client.SetJWTToken(newToken)
 		}
 
 		_, err = c.client.ConfidentialWrap(ctx, req)
@@ -707,7 +827,7 @@ func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrap
 			KeyPath:   t.keyPath,
 			Plaintext: plaintext,
 			AdditionalContext: &cwpb.RequestContext{
-				RelativeResourceName: "myresource",
+				RelativeResourceName: *unprotectedKeyResourceName,
 				AccessReasonContext:  &cwpb.AccessReasonContext{Reason: cwpb.AccessReasonContext_CUSTOMER_INITIATED_ACCESS},
 			},
 			AdditionalAuthenticatedData: nil,
@@ -764,7 +884,7 @@ func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrap
 			KeyPath:     t.keyPath,
 			WrappedBlob: wrapResp.GetWrappedBlob(),
 			AdditionalContext: &cwpb.RequestContext{
-				RelativeResourceName: "myresource",
+				RelativeResourceName: *unprotectedKeyResourceName,
 				AccessReasonContext:  &cwpb.AccessReasonContext{Reason: cwpb.AccessReasonContext_CUSTOMER_INITIATED_ACCESS},
 			},
 			AdditionalAuthenticatedData: nil,
@@ -799,6 +919,14 @@ func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrap
 			},
 		}
 
+		if t.mutateJWT != nil {
+			newToken, err := t.mutateJWT(ctx, c.client.GetJWTToken())
+			if err != nil {
+				glog.Fatalf("Error mutating JWT: %v", err)
+			}
+			c.client.SetJWTToken(newToken)
+		}
+
 		resp2, err := c.client.ConfidentialUnwrap(ctx, req2)
 		if err != nil {
 			return fmt.Errorf("error session-encrypting the records: %v", err)
@@ -828,13 +956,8 @@ func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrap
 	return err
 }
 
-func main() {
-	flag.Parse()
-	ctx := context.Background()
-
-	// Define and run BeginSession tests.
-	fmt.Println("Running BeginSession tests...")
-
+// Test suites.
+func runBeginSessionTests(ctx context.Context) {
 	beginSessionTestCases := []beginSessionTest{
 		{
 			testName:  "Valid request with proper TLS Client Hello",
@@ -858,6 +981,16 @@ func main() {
 			expectErr:       true,
 			altCipherSuites: []uint16{tls.TLS_RSA_WITH_AES_256_GCM_SHA384},
 		},
+		{
+			testName:  "JWT has invalid signature",
+			expectErr: true,
+			mutateJWT: invalidateJwtSignature,
+		},
+		{
+			testName:  "JWT has a bad audience",
+			expectErr: true,
+			mutateJWT: badAudience,
+		},
 	}
 
 	for _, testCase := range beginSessionTestCases {
@@ -865,14 +998,15 @@ func main() {
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else {
+		} else if err != nil {
 			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
+		} else {
+			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
+}
 
-	// Define and run Handshake tests.
-	fmt.Println("\nRunning Handshake tests...")
-
+func runHandshakeTests(ctx context.Context) {
 	handshakeTestCases := []handshakeTest{
 		{
 			testName:  "Valid request with proper TLS Client Handshake",
@@ -888,6 +1022,16 @@ func main() {
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
 		},
+		{
+			testName:  "JWT has invalid signature",
+			expectErr: true,
+			mutateJWT: invalidateJwtSignature,
+		},
+		{
+			testName:  "JWT has a bad audience",
+			expectErr: true,
+			mutateJWT: badAudience,
+		},
 	}
 
 	for _, testCase := range handshakeTestCases {
@@ -901,10 +1045,9 @@ func main() {
 			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
+}
 
-	// Define and run NegotiateAttestation tests.
-	fmt.Println("\nRunning NegotiateAttestation tests...")
-
+func runNegotiateAttestationTests(ctx context.Context) {
 	negotiateAttestationTestCases := []negotiateAttestationTest{
 		{
 			testName:      "Valid request requesting null attestation",
@@ -980,6 +1123,18 @@ func main() {
 			evidenceTypes:    []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
 			mutateSessionKey: emptyFn,
 		},
+		{
+			testName:      "JWT has invalid signature",
+			expectErr:     true,
+			mutateJWT:     invalidateJwtSignature,
+			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+		},
+		{
+			testName:      "JWT has a bad audience",
+			expectErr:     true,
+			mutateJWT:     badAudience,
+			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+		},
 	}
 
 	for _, testCase := range negotiateAttestationTestCases {
@@ -1039,10 +1194,9 @@ func main() {
 			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
+}
 
-	// Define and run Finalize tests.
-	fmt.Println("\nRunning Finalize tests...")
-
+func runFinalizeTests(ctx context.Context) {
 	finalizeTestCases := []finalizeTest{
 		{
 			testName:      "Valid request requesting null attestation",
@@ -1081,6 +1235,18 @@ func main() {
 				aepb.AttestationEvidenceType_TCG_EVENT_LOG,
 			},
 		},
+		{
+			testName:      "JWT has invalid signature",
+			expectErr:     true,
+			mutateJWT:     invalidateJwtSignature,
+			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+		},
+		{
+			testName:      "JWT has a bad audience",
+			expectErr:     true,
+			mutateJWT:     badAudience,
+			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+		},
 	}
 
 	// Check for TPM and root privileges to determine if we can generate attestations.
@@ -1108,10 +1274,9 @@ func main() {
 			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
+}
 
-	// Define and run EndSession tests.
-	fmt.Println("\nRunning EndSession tests...")
-
+func runEndSessionTests(ctx context.Context) {
 	endSessionTestCases := []endSessionTest{
 		{
 			testName:  "Establish secure session then valid EndSession",
@@ -1127,6 +1292,16 @@ func main() {
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
 		},
+		{
+			testName:  "JWT has invalid signature",
+			expectErr: true,
+			mutateJWT: invalidateJwtSignature,
+		},
+		{
+			testName:  "JWT has a bad audience",
+			expectErr: true,
+			mutateJWT: badAudience,
+		},
 	}
 
 	for _, testCase := range endSessionTestCases {
@@ -1140,23 +1315,19 @@ func main() {
 			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
+}
 
-	goodKeyPath := (*keyURI)[strings.LastIndex(*keyURI, "/")+1:]
-	protectedKeyPath := (*protectedKeyURI)[strings.LastIndex(*protectedKeyURI, "/")+1:]
-
-	// Define and run ConfidentialWrap tests.
-	fmt.Println("\nRunning ConfidentialWrap tests...")
-
+func runConfidentialWrapTests(ctx context.Context, unprotectedKeyPath string, protectedKeyPath string) {
 	confidentialWrapTestCases := []confidentialWrapUnwrapTest{
 		{
 			testName:  "Establish secure session then valid ConfidentialWrap",
 			expectErr: false,
-			keyPath:   goodKeyPath,
+			keyPath:   unprotectedKeyPath,
 		},
 		{
 			testName:   "Establish secure session then valid Confidential Wrap twice",
 			expectErr:  false,
-			keyPath:    goodKeyPath,
+			keyPath:    unprotectedKeyPath,
 			extraCalls: 1,
 		},
 		{
@@ -1168,24 +1339,36 @@ func main() {
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
-			keyPath:          goodKeyPath,
+			keyPath:          unprotectedKeyPath,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
-			keyPath:          goodKeyPath,
+			keyPath:          unprotectedKeyPath,
 		},
 		{
 			testName:     "Close session before wrap",
 			expectErr:    true,
 			closeSession: true,
-			keyPath:      goodKeyPath,
+			keyPath:      unprotectedKeyPath,
 		},
 		{
 			testName:  "Wrap using protected key without CC attestation negotiated",
 			expectErr: true,
 			keyPath:   protectedKeyPath,
+		},
+		{
+			testName:  "JWT has invalid signature",
+			expectErr: true,
+			mutateJWT: invalidateJwtSignature,
+			keyPath:   unprotectedKeyPath,
+		},
+		{
+			testName:  "JWT has a bad audience",
+			expectErr: true,
+			mutateJWT: badAudience,
+			keyPath:   unprotectedKeyPath,
 		},
 	}
 
@@ -1200,20 +1383,19 @@ func main() {
 			colour.Printf(" - ^1%v^R missing error\n", testCase.testName)
 		}
 	}
+}
 
-	// Define and run ConfidentialUnwrap tests.
-	fmt.Println("\nRunning ConfidentialUnwrap tests...")
-
+func runConfidentialUnwrapTests(ctx context.Context, unprotectedKeyPath string, protectedKeyPath string) {
 	confidentialUnwrapTestCases := []confidentialWrapUnwrapTest{
 		{
 			testName:  "Establish secure session then valid ConfidentialUnwrap",
 			expectErr: false,
-			keyPath:   goodKeyPath,
+			keyPath:   unprotectedKeyPath,
 		},
 		{
 			testName:   "Establish secure session then valid Confidential Unwrap twice",
 			expectErr:  false,
-			keyPath:    goodKeyPath,
+			keyPath:    unprotectedKeyPath,
 			extraCalls: 1,
 		},
 		{
@@ -1225,24 +1407,36 @@ func main() {
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
-			keyPath:          goodKeyPath,
+			keyPath:          unprotectedKeyPath,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
-			keyPath:          goodKeyPath,
+			keyPath:          unprotectedKeyPath,
 		},
 		{
 			testName:     "Close session before unwrap",
 			expectErr:    true,
 			closeSession: true,
-			keyPath:      goodKeyPath,
+			keyPath:      unprotectedKeyPath,
 		},
 		{
 			testName:  "Unwrap using protected key without CC attestation negotiated",
 			expectErr: true,
 			keyPath:   protectedKeyPath,
+		},
+		{
+			testName:  "JWT has invalid signature",
+			expectErr: true,
+			mutateJWT: invalidateJwtSignature,
+			keyPath:   unprotectedKeyPath,
+		},
+		{
+			testName:  "JWT has a bad audience",
+			expectErr: true,
+			mutateJWT: badAudience,
+			keyPath:   unprotectedKeyPath,
 		},
 	}
 
@@ -1257,5 +1451,98 @@ func main() {
 			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
+}
+
+func getKeyURI(ctx context.Context, resourceName string) (string, error) {
+	client, err := kms.NewKeyManagementClient(ctx)
+	if err != nil {
+		return "", fmt.Errorf("error creating Cloud KMS client: %v", err)
+	}
+	defer client.Close()
+
+	cryptoKey, err := client.GetCryptoKey(ctx, &spb.GetCryptoKeyRequest{Name: resourceName})
+	if err != nil {
+		return "", fmt.Errorf("error getting CryptoKey for %v: %v", resourceName, err)
+	}
+
+	cryptoKeyVer := cryptoKey.GetPrimary()
+	if cryptoKeyVer.GetState() != rpb.CryptoKeyVersion_ENABLED {
+		return "", fmt.Errorf("key %v is not enabled", resourceName)
+	}
+
+	if cryptoKeyVer.ProtectionLevel != rpb.ProtectionLevel_EXTERNAL {
+		return "", fmt.Errorf("key %v does not have EXTERNAL protection level", resourceName)
+	}
+
+	if cryptoKeyVer.ExternalProtectionLevelOptions == nil {
+		return "", fmt.Errorf("key %vs does not have external protection level options", resourceName)
+	}
+
+	return cryptoKeyVer.GetExternalProtectionLevelOptions().GetExternalKeyUri(), nil
+}
+
+func configureKeyURIs(ctx context.Context) error {
+	if *unprotectedKeyResourceName == defaultKeyResourceName {
+		unprotectedKeyURI = fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath1)
+	} else {
+		// Get unprotected keyURI.
+		var err error
+		unprotectedKeyURI, err = getKeyURI(ctx, *unprotectedKeyResourceName)
+		if err != nil {
+			return fmt.Errorf("Error getting unprotected KeyURI: %v", err)
+		}
+	}
+
+	if *protectedKeyResourceName == defaultProtectedKeyResourceName {
+		protectedKeyURI = fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath2)
+	} else {
+		var err error
+		protectedKeyURI, err = getKeyURI(ctx, *protectedKeyResourceName)
+		if err != nil {
+			return fmt.Errorf("Error getting protected KeyURI: %v", err)
+		}
+	}
+
+	return nil
+}
+
+func main() {
+	flag.Parse()
+	ctx := context.Background()
+
+	if err := configureKeyURIs(ctx); err != nil {
+		glog.Fatalf("Failed to configre key URIs: %v", err)
+	}
+
+	// Define and run BeginSession tests.
+	fmt.Println("Running BeginSession tests...")
+	runBeginSessionTests(ctx)
+
+	// Define and run Handshake tests.
+	fmt.Println("\nRunning Handshake tests...")
+	runHandshakeTests(ctx)
+
+	// Define and run NegotiateAttestation tests.
+	fmt.Println("\nRunning NegotiateAttestation tests...")
+	runNegotiateAttestationTests(ctx)
+
+	// Define and run Finalize tests.
+	fmt.Println("\nRunning Finalize tests...")
+	runFinalizeTests(ctx)
+
+	// Define and run EndSession tests.
+	fmt.Println("\nRunning EndSession tests...")
+	runEndSessionTests(ctx)
+
+	// Define and run ConfidentialWrap tests.
+	unprotectedKeyPath := (unprotectedKeyURI)[strings.LastIndex(unprotectedKeyURI, "/")+1:]
+	protectedKeyPath := (protectedKeyURI)[strings.LastIndex(protectedKeyURI, "/")+1:]
+
+	fmt.Println("\nRunning ConfidentialWrap tests...")
+	runConfidentialWrapTests(ctx, unprotectedKeyPath, protectedKeyPath)
+
+	// Define and run ConfidentialUnwrap tests.
+	fmt.Println("\nRunning ConfidentialUnwrap tests...")
+	runConfidentialUnwrapTests(ctx, unprotectedKeyPath, protectedKeyPath)
 
 }

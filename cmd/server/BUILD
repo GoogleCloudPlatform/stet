@@ -29,6 +29,7 @@ go_binary(
         "//proto:confidential_wrap_go_proto",
         "//proto:secure_session_go_proto",
         "//server",
+        "@com_github_golang_glog//:glog",
         "@org_golang_google_grpc//:grpc",
         "@org_golang_google_grpc//reflection",
     ],

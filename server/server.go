@@ -27,17 +27,20 @@ import (
 	"fmt"
 	"sync"
 
+	glog "github.com/golang/glog"
+	"github.com/google/uuid"
+	"google.golang.org/api/compute/v1"
+	"google.golang.org/api/idtoken"
+	"google.golang.org/grpc/metadata"
+
 	"github.com/GoogleCloudPlatform/stet/constants"
 	attpb "github.com/GoogleCloudPlatform/stet/proto/attestation_evidence_go_proto"
 	cwpb "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
 	pb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	sspb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	ts "github.com/GoogleCloudPlatform/stet/transportshim"
-	glog "github.com/golang/glog"
 	tpmpb "github.com/google/go-tpm-tools/proto/attest"
 	"github.com/google/go-tpm-tools/server"
-	"github.com/google/uuid"
-	"google.golang.org/api/compute/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -66,6 +69,11 @@ const (
 	// a minimum technology of SEV to wrap or unwrap keys.
 	KeyPath2 = "key2"
 	key2     = "key2encrypted"
+
+	// TokenMetadataKey metadata key for the JWT.
+	TokenMetadataKey = "authorization"
+	// TokenPrefix is prepended to the JWT in the HTTP header/context map.
+	TokenPrefix = "Bearer "
 )
 
 var requireSEV = &tpmpb.Policy{
@@ -96,10 +104,12 @@ type keyStruct struct {
 
 // SecureSessionService implements the SecureSession interface.
 type SecureSessionService struct {
-	tlsVersion uint16
-	mu         sync.Mutex
-	channels   map[string]*Channel
-	keys       map[string]keyStruct
+	tlsVersion         uint16
+	mu                 sync.Mutex
+	channels           map[string]*Channel
+	keys               map[string]keyStruct
+	audience           string
+	testTokenValidator *idtoken.Validator
 
 	// Necessary to embed these to maintain forward compatibility.
 	pb.UnimplementedConfidentialEkmSessionEstablishmentServiceServer
@@ -153,8 +163,43 @@ func NewChannel(tlsVersion uint16) (ch *Channel, err error) {
 	return ch, nil
 }
 
+func (s *SecureSessionService) verifyToken(ctx context.Context) error {
+	// If no audience, it's a unit test and don't verify the token.
+	// Note that a real server implementation should remove this check.
+	// Otherwise, if a server was started up without an expected audience,
+	// an attacker could pass token authentication by not passing a token.
+	if s.audience == "" {
+		return nil
+	}
+	md, present := metadata.FromIncomingContext(ctx)
+	if !present {
+		return fmt.Errorf("expected to see metadata")
+	}
+	tokenValues := md.Get(TokenMetadataKey)
+	if len(tokenValues) != 1 {
+		return fmt.Errorf("Expected to see one value for the authorization token: %v in metadata %v", tokenValues, md)
+	}
+
+	authTokenWithPrefix := tokenValues[0]
+	if len(authTokenWithPrefix) < len(TokenPrefix) {
+		return fmt.Errorf("Auth token %s is too short", tokenValues[0])
+	}
+	authToken := tokenValues[0][len(TokenPrefix):]
+
+	if s.testTokenValidator != nil {
+		if _, err := s.testTokenValidator.Validate(ctx, authToken, s.audience); err != nil {
+			return fmt.Errorf("error validating auth token: %w", err)
+		}
+	} else {
+		if _, err := idtoken.Validate(ctx, authToken, s.audience); err != nil {
+			return fmt.Errorf("error validating auth token: %w", err)
+		}
+	}
+	return nil
+}
+
 // NewSecureSessionService creates instance of secure session service
-func NewSecureSessionService(tlsVersion uint16) (srv *SecureSessionService, err error) {
+func NewSecureSessionService(tlsVersion uint16, audience string) (srv *SecureSessionService, err error) {
 	srv = &SecureSessionService{tlsVersion: tlsVersion}
 	srv.channels = make(map[string]*Channel)
 	srv.keys = map[string]keyStruct{
@@ -171,14 +216,18 @@ func NewSecureSessionService(tlsVersion uint16) (srv *SecureSessionService, err 
 			},
 		},
 	}
+	srv.audience = audience
 	return srv, nil
 }
 
 func (s *SecureSessionService) BeginSession(ctx context.Context, req *sspb.BeginSessionRequest) (*sspb.BeginSessionResponse, error) {
-	ch, err := NewChannel(s.tlsVersion)
+	if err := s.verifyToken(ctx); err != nil {
+		return nil, fmt.Errorf("failed to verify JWT: %w", err)
+	}
 
+	ch, err := NewChannel(s.tlsVersion)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create new channnel: %v", err)
+		return nil, fmt.Errorf("failed to create new channnel: %w", err)
 	}
 
 	go func() {
@@ -205,6 +254,10 @@ func (s *SecureSessionService) BeginSession(ctx context.Context, req *sspb.Begin
 }
 
 func (s *SecureSessionService) Handshake(ctx context.Context, req *sspb.HandshakeRequest) (*sspb.HandshakeResponse, error) {
+	if err := s.verifyToken(ctx); err != nil {
+		return nil, fmt.Errorf("failed to verify JWT: %w", err)
+	}
+
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
 
@@ -258,6 +311,10 @@ func (s *SecureSessionService) Handshake(ctx context.Context, req *sspb.Handshak
 }
 
 func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *sspb.NegotiateAttestationRequest) (*sspb.NegotiateAttestationResponse, error) {
+	if err := s.verifyToken(ctx); err != nil {
+		return nil, fmt.Errorf("failed to verify JWT: %w", err)
+	}
+
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
 
@@ -342,6 +399,10 @@ func (s *SecureSessionService) NegotiateAttestation(ctx context.Context, req *ss
 }
 
 func (s *SecureSessionService) Finalize(ctx context.Context, req *sspb.FinalizeRequest) (*sspb.FinalizeResponse, error) {
+	if err := s.verifyToken(ctx); err != nil {
+		return nil, fmt.Errorf("failed to verify JWT: %w", err)
+	}
+
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
 
@@ -474,6 +535,10 @@ func (s *SecureSessionService) Finalize(ctx context.Context, req *sspb.FinalizeR
 // ConfidentialWrap wraps the aad and plaintext in the request by concatenating
 // them as (aad | key | plaintext).
 func (s *SecureSessionService) ConfidentialWrap(ctx context.Context, req *cwpb.ConfidentialWrapRequest) (*cwpb.ConfidentialWrapResponse, error) {
+	if err := s.verifyToken(ctx); err != nil {
+		return nil, fmt.Errorf("failed to verify JWT: %w", err)
+	}
+
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
 
@@ -532,6 +597,10 @@ func (s *SecureSessionService) ConfidentialWrap(ctx context.Context, req *cwpb.C
 // first part of the split does not match the aad, the unwrapping fails and
 // returns an error. Otherwise, returns the determined plaintext.
 func (s *SecureSessionService) ConfidentialUnwrap(ctx context.Context, req *cwpb.ConfidentialUnwrapRequest) (*cwpb.ConfidentialUnwrapResponse, error) {
+	if err := s.verifyToken(ctx); err != nil {
+		return nil, fmt.Errorf("failed to verify JWT: %w", err)
+	}
+
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
 
@@ -591,6 +660,10 @@ func (s *SecureSessionService) ConfidentialUnwrap(ctx context.Context, req *cwpb
 }
 
 func (s *SecureSessionService) EndSession(ctx context.Context, req *sspb.EndSessionRequest) (*sspb.EndSessionResponse, error) {
+	if err := s.verifyToken(ctx); err != nil {
+		return nil, fmt.Errorf("failed to verify JWT: %w", err)
+	}
+
 	connID := base64.StdEncoding.EncodeToString(req.SessionContext)
 	ch, found := s.channels[connID]
 

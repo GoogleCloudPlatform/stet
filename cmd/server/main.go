@@ -25,6 +25,8 @@ import (
 	"syscall"
 
 	"flag"
+	glog "github.com/golang/glog"
+
 	"github.com/GoogleCloudPlatform/stet/constants"
 	cwgrpc "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
 	ssgrpc "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
@@ -37,6 +39,7 @@ var (
 	grpcPort = flag.Int("grpc-port", constants.GrpcPort, "gRPC server port")
 	httpPort = flag.Int("port", constants.HTTPPort, "HTTP server port")
 	useTLS12 = flag.Bool("tls12", false, "Use TLS 1.2 for secure session")
+	audience = flag.String("audience", "http://localhost", "The audience of JWTs for the server")
 )
 
 func main() {
@@ -45,14 +48,12 @@ func main() {
 	// Listen for connections on the gRPC service and HTTP proxy ports.
 	grpcLis, err := net.Listen("tcp", fmt.Sprintf(":%d", *grpcPort))
 	if err != nil {
-		fmt.Printf("failed to listen: %v\n", err)
-		os.Exit(1)
+		glog.Fatalf("failed to listen: %v\n", err)
 	}
 
 	httpLis, err := net.Listen("tcp", fmt.Sprintf(":%d", *httpPort))
 	if err != nil {
-		fmt.Printf("failed to listen: %v\n", err)
-		os.Exit(1)
+		glog.Fatalf("failed to listen: %v\n", err)
 	}
 
 	grpcServer := grpc.NewServer()
@@ -66,13 +67,13 @@ func main() {
 		tlsVersion = tls.VersionTLS12
 	}
 
-	serv, _ := server.NewSecureSessionService(tlsVersion)
+	serv, _ := server.NewSecureSessionService(tlsVersion, *audience)
 	ssgrpc.RegisterConfidentialEkmSessionEstablishmentServiceServer(grpcServer, serv)
 	cwgrpc.RegisterConfidentialWrapUnwrapServiceServer(grpcServer, serv)
 
 	httpService, err := server.NewSecureSessionHTTPService(grpcLis.Addr().String(), "")
 	if err != nil {
-		fmt.Printf("failed to create HTTP server: %v\n", err)
+		glog.Fatalf("failed to create HTTP service: %v\n", err)
 	}
 
 	httpServ := &http.Server{
