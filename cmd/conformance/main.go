@@ -1380,7 +1380,7 @@ func runConfidentialWrapTests(ctx context.Context, unprotectedKeyPath string, pr
 		} else if err != nil {
 			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
 		} else {
-			colour.Printf(" - ^1%v^R missing error\n", testCase.testName)
+			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
 		}
 	}
 }
