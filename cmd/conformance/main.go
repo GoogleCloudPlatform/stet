@@ -153,12 +153,33 @@ func badAudience(ctx context.Context, token string) (string, error) {
 	return jwt.GenerateJWT(ctx, "https://dogs-in-the-office.com")
 }
 
+// Prints error message in red by default, yellow (with an additional suffix) if the test
+// is optional.
+func printError(testName string, err error, optional bool) {
+	optionalSuffix := " - NOTE: passing this test case is optional, but recommended"
+
+	if err != nil {
+		if optional {
+			colour.Printf(" - ^3%v^R (%v)%v\n", testName, err.Error(), optionalSuffix)
+		} else {
+			colour.Printf(" - ^1%v^R (%v)\n", testName, err.Error())
+		}
+	} else {
+		if optional {
+			colour.Printf(" - ^3%v^R (missing error)%v\n", testName, optionalSuffix)
+		} else {
+			colour.Printf(" - ^1%v^R (missing error)\n", testName)
+		}
+	}
+}
+
 type beginSessionTest struct {
 	testName         string
 	expectErr        bool
 	mutateTLSRecords func(r []byte) []byte
 	mutateJWT        func(context.Context, string) (string, error)
 	altCipherSuites  []uint16
+	optional         bool
 }
 
 func runBeginSessionTestCase(ctx context.Context, t beginSessionTest) error {
@@ -218,6 +239,7 @@ type handshakeTest struct {
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
 	mutateJWT        func(context.Context, string) (string, error)
+	optional         bool
 }
 
 func runHandshakeTestCase(ctx context.Context, t handshakeTest) error {
@@ -288,6 +310,7 @@ type negotiateAttestationTest struct {
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
 	mutateJWT        func(context.Context, string) (string, error)
+	optional         bool
 }
 
 func runNegotiateAttestationTestCase(ctx context.Context, t negotiateAttestationTest) (*aepb.AttestationEvidenceTypeList, error) {
@@ -403,6 +426,7 @@ type finalizeTest struct {
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
 	mutateJWT        func(context.Context, string) (string, error)
+	optional         bool
 }
 
 func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
@@ -667,6 +691,7 @@ type endSessionTest struct {
 	mutateTLSRecords func(r []byte) []byte
 	mutateSessionKey func(s []byte) []byte
 	mutateJWT        func(context.Context, string) (string, error)
+	optional         bool
 }
 
 func runEndSessionTestCase(ctx context.Context, t endSessionTest) error {
@@ -985,11 +1010,13 @@ func runBeginSessionTests(ctx context.Context) {
 			testName:  "JWT has invalid signature",
 			expectErr: true,
 			mutateJWT: invalidateJwtSignature,
+			optional:  true,
 		},
 		{
 			testName:  "JWT has a bad audience",
 			expectErr: true,
 			mutateJWT: badAudience,
+			optional:  true,
 		},
 	}
 
@@ -998,10 +1025,8 @@ func runBeginSessionTests(ctx context.Context) {
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else if err != nil {
-			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
 		} else {
-			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
+			printError(testCase.testName, err, testCase.optional)
 		}
 	}
 }
@@ -1026,11 +1051,13 @@ func runHandshakeTests(ctx context.Context) {
 			testName:  "JWT has invalid signature",
 			expectErr: true,
 			mutateJWT: invalidateJwtSignature,
+			optional:  true,
 		},
 		{
 			testName:  "JWT has a bad audience",
 			expectErr: true,
 			mutateJWT: badAudience,
+			optional:  true,
 		},
 	}
 
@@ -1039,10 +1066,8 @@ func runHandshakeTests(ctx context.Context) {
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else if err != nil {
-			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
 		} else {
-			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
+			printError(testCase.testName, err, testCase.optional)
 		}
 	}
 }
@@ -1128,12 +1153,14 @@ func runNegotiateAttestationTests(ctx context.Context) {
 			expectErr:     true,
 			mutateJWT:     invalidateJwtSignature,
 			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+			optional:      true,
 		},
 		{
 			testName:      "JWT has a bad audience",
 			expectErr:     true,
 			mutateJWT:     badAudience,
 			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+			optional:      true,
 		},
 	}
 
@@ -1188,10 +1215,8 @@ func runNegotiateAttestationTests(ctx context.Context) {
 
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else if err != nil {
-			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
 		} else {
-			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
+			printError(testCase.testName, err, testCase.optional)
 		}
 	}
 }
@@ -1240,12 +1265,14 @@ func runFinalizeTests(ctx context.Context) {
 			expectErr:     true,
 			mutateJWT:     invalidateJwtSignature,
 			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+			optional:      true,
 		},
 		{
 			testName:      "JWT has a bad audience",
 			expectErr:     true,
 			mutateJWT:     badAudience,
 			evidenceTypes: []aepb.AttestationEvidenceType{aepb.AttestationEvidenceType_NULL_ATTESTATION},
+			optional:      true,
 		},
 	}
 
@@ -1268,10 +1295,8 @@ func runFinalizeTests(ctx context.Context) {
 
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else if err != nil {
-			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
 		} else {
-			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
+			printError(testCase.testName, err, testCase.optional)
 		}
 	}
 }
@@ -1296,11 +1321,13 @@ func runEndSessionTests(ctx context.Context) {
 			testName:  "JWT has invalid signature",
 			expectErr: true,
 			mutateJWT: invalidateJwtSignature,
+			optional:  true,
 		},
 		{
 			testName:  "JWT has a bad audience",
 			expectErr: true,
 			mutateJWT: badAudience,
+			optional:  true,
 		},
 	}
 
@@ -1309,10 +1336,8 @@ func runEndSessionTests(ctx context.Context) {
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else if err != nil {
-			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
 		} else {
-			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
+			printError(testCase.testName, err, testCase.optional)
 		}
 	}
 }
@@ -1377,10 +1402,8 @@ func runConfidentialWrapTests(ctx context.Context, unprotectedKeyPath string, pr
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else if err != nil {
-			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
 		} else {
-			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
+			printError(testCase.testName, err, false)
 		}
 	}
 }
@@ -1445,10 +1468,8 @@ func runConfidentialUnwrapTests(ctx context.Context, unprotectedKeyPath string, 
 		testPassed := testCase.expectErr == (err != nil)
 		if testPassed {
 			colour.Printf(" - ^2%v^R\n", testCase.testName)
-		} else if err != nil {
-			colour.Printf(" - ^1%v^R (%v)\n", testCase.testName, err.Error())
 		} else {
-			colour.Printf(" - ^1%v^R (missing error)\n", testCase.testName)
+			printError(testCase.testName, err, false)
 		}
 	}
 }
