@@ -574,8 +574,8 @@ func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
 }
 
 // Establishes a secure session, returning the ekmClient and session context.
-func establishSecureSessionWithNullAttestation(ctx context.Context) (*ekmClient, []byte, error) {
-	c := newEKMClient(ctx, unprotectedKeyURI)
+func establishSecureSessionWithNullAttestation(ctx context.Context, uri string) (*ekmClient, []byte, error) {
+	c := newEKMClient(ctx, uri)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -695,7 +695,7 @@ type endSessionTest struct {
 }
 
 func runEndSessionTestCase(ctx context.Context, t endSessionTest) error {
-	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx)
+	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx, unprotectedKeyURI)
 	if err != nil {
 		return err
 	}
@@ -734,7 +734,7 @@ func runEndSessionTestCase(ctx context.Context, t endSessionTest) error {
 type confidentialWrapUnwrapTest struct {
 	testName         string
 	expectErr        bool
-	keyPath          string
+	keyURI           string
 	extraCalls       int
 	closeSession     bool
 	mutateTLSRecords func(r []byte) []byte
@@ -743,7 +743,7 @@ type confidentialWrapUnwrapTest struct {
 }
 
 func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTest) error {
-	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx)
+	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx, t.keyURI)
 
 	if err != nil {
 		return err
@@ -769,9 +769,11 @@ func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTe
 			sessionContext = t.mutateSessionKey(sessionContext)
 		}
 
+		keyPath := (t.keyURI)[strings.LastIndex(t.keyURI, "/")+1:]
+
 		// Create a WrapRequest, marshal, then session-encrypt it.
 		wrapReq := &cwpb.WrapRequest{
-			KeyPath:   t.keyPath,
+			KeyPath:   keyPath,
 			Plaintext: []byte{0x01},
 			AdditionalContext: &cwpb.RequestContext{
 				RelativeResourceName: *unprotectedKeyResourceName,
@@ -823,7 +825,7 @@ func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTe
 }
 
 func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrapTest) error {
-	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx)
+	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx, t.keyURI)
 
 	if err != nil {
 		return err
@@ -847,9 +849,11 @@ func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrap
 	for i := 0; i <= t.extraCalls; i++ {
 		plaintext := []byte("This is plaintext to encrypt.")
 
+		keyPath := (t.keyURI)[strings.LastIndex(t.keyURI, "/")+1:]
+
 		// Send a ConfidentialWrapRequest so we have a wrapped blob to decrypt.
 		wrapReq := &cwpb.WrapRequest{
-			KeyPath:   t.keyPath,
+			KeyPath:   keyPath,
 			Plaintext: plaintext,
 			AdditionalContext: &cwpb.RequestContext{
 				RelativeResourceName: *unprotectedKeyResourceName,
@@ -906,7 +910,7 @@ func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrap
 
 		// Create an UnwrapRequest where the WrappedBlob is what we previously encrypted.
 		unwrapReq := &cwpb.UnwrapRequest{
-			KeyPath:     t.keyPath,
+			KeyPath:     keyPath,
 			WrappedBlob: wrapResp.GetWrappedBlob(),
 			AdditionalContext: &cwpb.RequestContext{
 				RelativeResourceName: *unprotectedKeyResourceName,
@@ -1342,58 +1346,58 @@ func runEndSessionTests(ctx context.Context) {
 	}
 }
 
-func runConfidentialWrapTests(ctx context.Context, unprotectedKeyPath string, protectedKeyPath string) {
+func runConfidentialWrapTests(ctx context.Context) {
 	confidentialWrapTestCases := []confidentialWrapUnwrapTest{
 		{
 			testName:  "Establish secure session then valid ConfidentialWrap",
 			expectErr: false,
-			keyPath:   unprotectedKeyPath,
+			keyURI:    unprotectedKeyURI,
 		},
 		{
 			testName:   "Establish secure session then valid Confidential Wrap twice",
 			expectErr:  false,
-			keyPath:    unprotectedKeyPath,
+			keyURI:     unprotectedKeyURI,
 			extraCalls: 1,
 		},
 		{
 			testName:  "ConfidentialWrap with invalid key path",
 			expectErr: true,
-			keyPath:   "Surely the EKM would not have a valid key with this path...",
+			keyURI:    "fake.domain/Surely the EKM would not have a valid key with this path...",
 		},
 		{
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
-			keyPath:          unprotectedKeyPath,
+			keyURI:           unprotectedKeyURI,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
-			keyPath:          unprotectedKeyPath,
+			keyURI:           unprotectedKeyURI,
 		},
 		{
 			testName:     "Close session before wrap",
 			expectErr:    true,
 			closeSession: true,
-			keyPath:      unprotectedKeyPath,
+			keyURI:       unprotectedKeyURI,
 		},
 		{
 			testName:  "Wrap using protected key without CC attestation negotiated",
 			expectErr: true,
-			keyPath:   protectedKeyPath,
+			keyURI:    protectedKeyURI,
 		},
 		{
 			testName:  "JWT has invalid signature",
 			expectErr: true,
 			mutateJWT: invalidateJwtSignature,
-			keyPath:   unprotectedKeyPath,
+			keyURI:    unprotectedKeyURI,
 		},
 		{
 			testName:  "JWT has a bad audience",
 			expectErr: true,
 			mutateJWT: badAudience,
-			keyPath:   unprotectedKeyPath,
+			keyURI:    unprotectedKeyURI,
 		},
 	}
 
@@ -1408,58 +1412,58 @@ func runConfidentialWrapTests(ctx context.Context, unprotectedKeyPath string, pr
 	}
 }
 
-func runConfidentialUnwrapTests(ctx context.Context, unprotectedKeyPath string, protectedKeyPath string) {
+func runConfidentialUnwrapTests(ctx context.Context) {
 	confidentialUnwrapTestCases := []confidentialWrapUnwrapTest{
 		{
 			testName:  "Establish secure session then valid ConfidentialUnwrap",
 			expectErr: false,
-			keyPath:   unprotectedKeyPath,
+			keyURI:    unprotectedKeyURI,
 		},
 		{
 			testName:   "Establish secure session then valid Confidential Unwrap twice",
 			expectErr:  false,
-			keyPath:    unprotectedKeyPath,
+			keyURI:     unprotectedKeyURI,
 			extraCalls: 1,
 		},
 		{
 			testName:  "ConfidentialWrap with invalid key path",
 			expectErr: true,
-			keyPath:   "Surely the EKM would not have a valid key with this path...",
+			keyURI:    "fake.domain/Surely the EKM would not have a valid key with this path...",
 		},
 		{
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
-			keyPath:          unprotectedKeyPath,
+			keyURI:           unprotectedKeyURI,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
-			keyPath:          unprotectedKeyPath,
+			keyURI:           unprotectedKeyURI,
 		},
 		{
 			testName:     "Close session before unwrap",
 			expectErr:    true,
 			closeSession: true,
-			keyPath:      unprotectedKeyPath,
+			keyURI:       unprotectedKeyURI,
 		},
 		{
 			testName:  "Unwrap using protected key without CC attestation negotiated",
 			expectErr: true,
-			keyPath:   protectedKeyPath,
+			keyURI:    protectedKeyURI,
 		},
 		{
 			testName:  "JWT has invalid signature",
 			expectErr: true,
 			mutateJWT: invalidateJwtSignature,
-			keyPath:   unprotectedKeyPath,
+			keyURI:    unprotectedKeyURI,
 		},
 		{
 			testName:  "JWT has a bad audience",
 			expectErr: true,
 			mutateJWT: badAudience,
-			keyPath:   unprotectedKeyPath,
+			keyURI:    unprotectedKeyURI,
 		},
 	}
 
@@ -1556,14 +1560,11 @@ func main() {
 	runEndSessionTests(ctx)
 
 	// Define and run ConfidentialWrap tests.
-	unprotectedKeyPath := (unprotectedKeyURI)[strings.LastIndex(unprotectedKeyURI, "/")+1:]
-	protectedKeyPath := (protectedKeyURI)[strings.LastIndex(protectedKeyURI, "/")+1:]
-
 	fmt.Println("\nRunning ConfidentialWrap tests...")
-	runConfidentialWrapTests(ctx, unprotectedKeyPath, protectedKeyPath)
+	runConfidentialWrapTests(ctx)
 
 	// Define and run ConfidentialUnwrap tests.
 	fmt.Println("\nRunning ConfidentialUnwrap tests...")
-	runConfidentialUnwrapTests(ctx, unprotectedKeyPath, protectedKeyPath)
+	runConfidentialUnwrapTests(ctx)
 
 }
