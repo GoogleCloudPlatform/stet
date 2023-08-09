@@ -11,13 +11,12 @@ http_archive(
     ],
 )
 
-# Go Bazel Rules
 http_archive(
     name = "io_bazel_rules_go",
-    sha256 = "69de5c704a05ff37862f7e0f5534d4f479418afc21806c887db544a316f3cb6b",
+    sha256 = "51dc53293afe317d2696d4d6433a4c33feedb7748a9e352072e2ec3c0dafd2c6",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.27.0/rules_go-v0.27.0.tar.gz",
-        "https://github.com/bazelbuild/rules_go/releases/download/v0.27.0/rules_go-v0.27.0.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/rules_go/releases/download/v0.40.1/rules_go-v0.40.1.zip",
+        "https://github.com/bazelbuild/rules_go/releases/download/v0.40.1/rules_go-v0.40.1.zip",
     ],
 )
 
@@ -51,8 +50,8 @@ http_archive(
     name = "bazel_gazelle",
     sha256 = "de69a09dc70417580aabf20a28619bb3ef60d038470c7cf8442fafcf627c21cb",
     urls = [
-        "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.24.0/bazel-gazelle-v0.24.0.tar.gz",
-        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.24.0/bazel-gazelle-v0.24.0.tar.gz",
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.31.1/bazel-gazelle-v0.31.1.tar.gz",
+        "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.31.1/bazel-gazelle-v0.31.1.tar.gz",
     ],
 )
 
@@ -72,9 +71,9 @@ go_library(
     visibility = ["//visibility:public"],
 )
 """,
-    sha256 = "265b1632857af01984fa108644ef1e00f4545db889c21443025bf46941b9c845",
-    strip_prefix = "vault-1.13.2",
-    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.13.2.tar.gz"],
+    sha256 = "507ad9503c6487d4dd4543fc9974ae306797ec36be75ce1d7c31aa43839bdabf",
+    strip_prefix = "vault-1.14.1",
+    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.14.1.tar.gz"],
 )
 
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
@@ -267,7 +266,7 @@ go_repository(
 # General go toolchain dependencies
 load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
 go_rules_dependencies()
-go_register_toolchains(version = "1.16")
+go_register_toolchains(version = "1.20.5")
 
 # Required for go_repository imports.
 gazelle_dependencies()

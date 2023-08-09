@@ -34,8 +34,8 @@ const testJWT = "eyJhbGciOiJSUzI1NiIsImtpZCI6InRlc3Qga2lkIiwidHlwIjoiSldUIn0.eyJ
 const testAudience = "test aud"
 
 // JWK info corresponding to testJWT.
-var testJWKInfo = map[string]interface{}{
-	"keys": []map[string]interface{}{
+var testJWKInfo = map[string]any{
+	"keys": []map[string]any{
 		{
 			"alg": "RS256",
 			"kid": "test kid",
