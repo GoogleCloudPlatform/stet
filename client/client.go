@@ -221,55 +221,52 @@ type kekMetadata struct {
 	resourceName    string
 }
 
-// protectionLevelsAndUris takes a list of KekInfos and queries Cloud KMS for the corresponding protection levels and URIs.
-func (c *StetClient) protectionLevelsAndUris(ctx context.Context, kekInfos []*configpb.KekInfo) ([]kekMetadata, error) {
-	var kekMetadatas []kekMetadata
-	for _, kekInfo := range kekInfos {
-		kmd := kekMetadata{}
-
-		// Cloud KMS only needs to be queried if a KEK URI is specified (eg. not an RSA fingerprint).
-		switch kekInfo.GetKekType().(type) {
-		case *configpb.KekInfo_KekUri:
-			uri := kekInfo.GetKekUri()
-			// Verify that the URI indicates a GCP KMS key.
-			if !strings.HasPrefix(uri, gcpKeyPrefix) {
-				return nil, fmt.Errorf("%v does not have the expected URI prefix, want %v", uri, gcpKeyPrefix)
-			}
-
-			cryptoKey, err := c.kmsClient.GetCryptoKey(ctx, &spb.GetCryptoKeyRequest{Name: strings.TrimPrefix(uri, gcpKeyPrefix)})
-			if err != nil {
-				return nil, fmt.Errorf("error retrieving key metadata: %v", err)
-			}
-
-			cryptoKeyVer := cryptoKey.GetPrimary()
-			if cryptoKeyVer.GetState() != rpb.CryptoKeyVersion_ENABLED {
-				return nil, fmt.Errorf("CryptoKeyVersion for %v is not enabled", uri)
-			}
-
-			if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED {
-				return nil, fmt.Errorf("unspecified protection level %v", cryptoKeyVer.GetProtectionLevel())
-			}
-
-			kmd.protectionLevel = cryptoKeyVer.GetProtectionLevel()
-
-			if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_EXTERNAL {
-				if cryptoKeyVer.ExternalProtectionLevelOptions == nil {
-					return nil, fmt.Errorf("CryptoKeyVersion for KEK %s does not have external protection level options despite being EXTERNAL protection level", uri)
-				}
-
-				// Use external URI to unwrap with.
-				kmd.uri = cryptoKeyVer.GetExternalProtectionLevelOptions().GetExternalKeyUri()
-			} else {
-				kmd.uri = uri
-			}
-
-			kmd.resourceName = strings.TrimPrefix(uri, gcpKeyPrefix)
-		}
-
-		kekMetadatas = append(kekMetadatas, kmd)
+// Retrieves the metadata of a CloudKMS KEK URI.
+func getKekURIMetadata(ctx context.Context, kmsClient cloudKMSClient, kekInfo *configpb.KekInfo) (*kekMetadata, error) {
+	_, ok := kekInfo.GetKekType().(*configpb.KekInfo_KekUri)
+	// No-op if this does not describe a KEK URI.
+	if !ok {
+		return nil, fmt.Errorf("cannot retrieve KEK Metadata for a non-KEK")
 	}
 
-	return kekMetadatas, nil
+	kmd := &kekMetadata{}
+
+	uri := kekInfo.GetKekUri()
+	// Verify that the URI indicates a GCP KMS key.
+	if !strings.HasPrefix(uri, gcpKeyPrefix) {
+		return nil, fmt.Errorf("%v does not have the expected URI prefix, want %v", uri, gcpKeyPrefix)
+	}
+
+	cryptoKey, err := kmsClient.GetCryptoKey(ctx, &spb.GetCryptoKeyRequest{Name: strings.TrimPrefix(uri, gcpKeyPrefix)})
+	if err != nil {
+		return nil, fmt.Errorf("error retrieving key metadata: %v", err)
+	}
+
+	cryptoKeyVer := cryptoKey.GetPrimary()
+	if cryptoKeyVer.GetState() != rpb.CryptoKeyVersion_ENABLED {
+		return nil, fmt.Errorf("CryptoKeyVersion for %v is not enabled", uri)
+	}
+
+	if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED {
+		return nil, fmt.Errorf("unspecified protection level %v", cryptoKeyVer.GetProtectionLevel())
+	}
+
+	kmd.protectionLevel = cryptoKeyVer.GetProtectionLevel()
+
+	if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_EXTERNAL {
+		if cryptoKeyVer.ExternalProtectionLevelOptions == nil {
+			return nil, fmt.Errorf("CryptoKeyVersion for KEK %s does not have external protection level options despite being EXTERNAL protection level", uri)
+		}
+
+		// Use external URI to unwrap with.
+		kmd.uri = cryptoKeyVer.GetExternalProtectionLevelOptions().GetExternalKeyUri()
+	} else {
+		kmd.uri = uri
+	}
+
+	kmd.resourceName = strings.TrimPrefix(uri, gcpKeyPrefix)
+
+	return kmd, nil
 }
 
 // wrapShares encrypts the given shares using either the given key URIs or the
@@ -281,9 +278,6 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 	if len(unwrappedShares) != len(kekInfos) {
 		return nil, nil, fmt.Errorf("number of shares to wrap (%d) does not match number of KEKs (%d)", len(unwrappedShares), len(kekInfos))
 	}
-
-	// Gets populated once the first non-local key is seen.
-	var kekMetadatas []kekMetadata
 
 	for i, share := range unwrappedShares {
 		wrapped := &configpb.WrappedShare{
@@ -305,30 +299,27 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 			}
 
 		case *configpb.KekInfo_KekUri:
-			// Instantiate `kmsClient` and populate `kekMetadatas` if not already done.
+			// Instantiate `kmsClient` if not already done.
 			if err := c.initializeKMSClient(ctx); err != nil {
 				return nil, nil, fmt.Errorf("error initializing KMS Client: %v", err)
 			}
 			defer c.kmsClient.Close()
 
-			if kekMetadatas == nil {
-				var err error
-				kekMetadatas, err = c.protectionLevelsAndUris(ctx, kekInfos)
-				if err != nil {
-					return nil, nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
-				}
+			kmd, err := getKekURIMetadata(ctx, c.kmsClient, kek)
+			if err != nil {
+				return nil, nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
 			}
 
 			// Wrap share via KMS.
-			switch pl := kekMetadatas[i].protectionLevel; pl {
+			switch pl := kmd.protectionLevel; pl {
 			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
 				var err error
-				wrapped.Share, err = c.wrapKMSShare(ctx, share, kekMetadatas[i].resourceName)
+				wrapped.Share, err = c.wrapKMSShare(ctx, share, kmd.resourceName)
 				if err != nil {
 					return nil, nil, fmt.Errorf("error wrapping key share: %v", err)
 				}
 			case rpb.ProtectionLevel_EXTERNAL:
-				ekmWrappedShare, err := c.ekmSecureSessionWrap(ctx, share, kekMetadatas[i])
+				ekmWrappedShare, err := c.ekmSecureSessionWrap(ctx, share, *kmd)
 				if err != nil {
 					return nil, nil, fmt.Errorf("error wrapping with secure session: %v", err)
 				}
@@ -340,7 +331,7 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 
 			// Return the URI used: the Cloud KMS one in the case of a software
 			// or HSM key, and the external key URI for an external key.
-			keyURIs = append(keyURIs, kekMetadatas[i].uri)
+			keyURIs = append(keyURIs, kmd.uri)
 
 		default:
 			return nil, nil, fmt.Errorf("unsupported KekInfo type: %v", x)
@@ -377,9 +368,6 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 		return nil, fmt.Errorf("number of shares to unwrap (%d) does not match number of KEKs (%d)", len(wrappedShares), len(kekInfos))
 	}
 
-	// Gets populated once the first non-local key is seen.
-	var kekMetadatas []kekMetadata
-
 	// In order to support k-of-n decryption, don't exit early if share
 	// share unwrapping fails. Attempt to unwrap all shares and just
 	// return the subset of ones that succeeded, and let the Shamir's
@@ -405,35 +393,30 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 			}
 
 		case *configpb.KekInfo_KekUri:
-			// Instantiate `kmsClient` and populate `kekMetadatas` if not already done.
+			// Instantiate `kmsClient` if not already done.
 			if err := c.initializeKMSClient(ctx); err != nil {
 				glog.Warningf("Error initializing Cloud KMS Client: %v", err)
 				continue
 			}
 			defer c.kmsClient.Close()
 
-			if kekMetadatas == nil {
-				var err error
-				kekMetadatas, err = c.protectionLevelsAndUris(ctx, kekInfos)
-				if err != nil {
-					glog.Warningf("Error retrieving KEK Metadata: %v", err)
-					continue
-				}
+			kmd, err := getKekURIMetadata(ctx, c.kmsClient, kek)
+			if err != nil {
+				return nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
 			}
 
 			// Unwrap share via KMS.
-			var err error
-			switch pl := kekMetadatas[i].protectionLevel; pl {
+			switch pl := kmd.protectionLevel; pl {
 			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
-				unwrapped.Share, err = c.unwrapKMSShare(ctx, wrapped.GetShare(), kekMetadatas[i].resourceName)
+				unwrapped.Share, err = c.unwrapKMSShare(ctx, wrapped.GetShare(), kmd.resourceName)
 				if err != nil {
 					glog.Warningf("Error unwrapping key share: %v", err)
 					continue
 				}
 			case rpb.ProtectionLevel_EXTERNAL:
-				unwrapped.Share, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), kekMetadatas[i])
+				unwrapped.Share, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), *kmd)
 				if err != nil {
-					glog.Warningf("Error unwrapping with external EKM for %v: %v", kekMetadatas[i].uri, err)
+					glog.Warningf("Error unwrapping with external EKM for %v: %v", kmd.uri, err)
 					continue
 				}
 			default:
@@ -443,7 +426,7 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 
 			// Return the URI used: the Cloud KMS one in the case of a software
 			// or HSM key, and the external key URI for an external key.
-			unwrapped.URI = kekMetadatas[i].uri
+			unwrapped.URI = kmd.uri
 
 		default:
 			glog.Warningf("Unsupported KekInfo type: %v", x)

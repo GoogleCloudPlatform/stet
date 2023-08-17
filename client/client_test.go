@@ -28,11 +28,11 @@ import (
 	"github.com/google/tink/go/subtle/random"
 	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/protobuf/proto"
-	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	kmsrpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	kmsspb "google.golang.org/genproto/googleapis/cloud/kms/v1"
+	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
@@ -220,74 +220,89 @@ func TestParseEKMKeyURI(t *testing.T) {
 	}
 }
 
-func TestProtectionLevelsAndUris(t *testing.T) {
+func TestGetKekMetadata(t *testing.T) {
 	ctx := context.Background()
 
-	kekInfos := []*configpb.KekInfo{
-		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURI + "1",
+	testcases := []struct {
+		name            string
+		protectionLevel kmsrpb.ProtectionLevel
+		kekInfo         *configpb.KekInfo
+		expectedURI     string
+	}{
+		{
+			name:            "HSM Protection Level",
+			protectionLevel: kmsrpb.ProtectionLevel_HSM,
+			kekInfo: &configpb.KekInfo{
+				KekType: &configpb.KekInfo_KekUri{KekUri: testKEKURI + "1"},
 			},
+			expectedURI: testKEKURI + "1",
 		},
-		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURI + "2",
+		{
+			name:            "Software Protection Level",
+			protectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
+			kekInfo: &configpb.KekInfo{
+				KekType: &configpb.KekInfo_KekUri{KekUri: testKEKURI + "2"},
 			},
+			expectedURI: testKEKURI + "2",
 		},
-		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURI + "3",
+		{
+			name:            "External Protection Level",
+			protectionLevel: kmsrpb.ProtectionLevel_EXTERNAL,
+			kekInfo: &configpb.KekInfo{
+				KekType: &configpb.KekInfo_KekUri{KekUri: testKEKURI + "3"},
 			},
-		},
-		// This struct should be ignored by protectionLevelsAndUris(), resulting
-		// in an empty kekMetadata in the return value.
-		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_RsaFingerprint{
-				RsaFingerprint: testPublicFingerprint,
-			},
+			expectedURI: testExternalKEKURI,
 		},
 	}
 
-	expectedURIs := []string{testKEKURI + "1", testKEKURI + "2", testExternalKEKURI, ""}
-
-	protectionLevels := []kmsrpb.ProtectionLevel{kmsrpb.ProtectionLevel_HSM, kmsrpb.ProtectionLevel_SOFTWARE, kmsrpb.ProtectionLevel_EXTERNAL, kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED}
-	plIndex := 0
-	fakeKMSClient := &fakeKeyManagementClient{
-		getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
-			ck := createEnabledCryptoKey(protectionLevels[plIndex])
-			plIndex++
-			return ck, nil
-		},
-	}
-
-	c := StetClient{kmsClient: fakeKMSClient}
-	kekMetadatas, err := c.protectionLevelsAndUris(ctx, kekInfos)
-
-	if err != nil {
-		t.Fatalf("protectionLevelsAndUris(ctx, %v) returned with error %v", kekInfos, err)
-	}
-
-	for i, kmd := range kekMetadatas {
-		if kmd.uri != expectedURIs[i] {
-			t.Errorf("protectionLevelsAndUris(ctx, %v) did not return the expected URI. Got %v, want %v", kekInfos, kmd.uri, expectedURIs[i])
-		}
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			kmsClient := &fakeKeyManagementClient{
+				getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+					ck := createEnabledCryptoKey(tc.protectionLevel)
+					return ck, nil
+				},
+			}
+			kekMetadata, err := getKekURIMetadata(ctx, kmsClient, tc.kekInfo)
+			if err != nil {
+				t.Fatalf("getKekMetadata(ctx, %v) returned with error %v", tc.kekInfo, err)
+			}
+			if kekMetadata.uri != tc.expectedURI {
+				t.Errorf("getKekMetadata(ctx, %v) did not return the expected URI. Got %v, want %v", tc.kekInfo, kekMetadata.uri, tc.expectedURI)
+			}
+		})
 	}
 }
 
-func TestProtectionLevelsAndUrisErrors(t *testing.T) {
+func TestGetKekMetadataRSAFingerprint(t *testing.T) {
 	ctx := context.Background()
-	validKekInfos := []*configpb.KekInfo{
-		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURI,
-			},
+
+	kekInfo := &configpb.KekInfo{
+		KekType: &configpb.KekInfo_RsaFingerprint{RsaFingerprint: testPublicFingerprint},
+	}
+
+	kmsClient := &fakeKeyManagementClient{
+		getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+			t.Fatalf("This should not be called.")
+			return nil, nil
 		},
+	}
+
+	if _, err := getKekURIMetadata(ctx, kmsClient, kekInfo); err == nil {
+		t.Errorf("getKekMetadata returned successful, expect error.")
+	}
+}
+
+func TestGetKekMetadataErrors(t *testing.T) {
+	ctx := context.Background()
+	validKekInfo := &configpb.KekInfo{
+		KekType: &configpb.KekInfo_KekUri{KekUri: testKEKURI},
 	}
 
 	testCases := []struct {
 		name              string
 		fakeKmsClient     *fakeKeyManagementClient
-		kekInfos          []*configpb.KekInfo
+		kekInfo           *configpb.KekInfo
 		expectedErrSubstr string
 	}{
 		{
@@ -297,7 +312,7 @@ func TestProtectionLevelsAndUrisErrors(t *testing.T) {
 					return nil, errors.New("this is an error from GetCryptoKey")
 				},
 			},
-			kekInfos:          validKekInfos,
+			kekInfo:           validKekInfo,
 			expectedErrSubstr: "retrieving key metadata",
 		},
 		{
@@ -313,7 +328,7 @@ func TestProtectionLevelsAndUrisErrors(t *testing.T) {
 					}, nil
 				},
 			},
-			kekInfos:          validKekInfos,
+			kekInfo:           validKekInfo,
 			expectedErrSubstr: "not enabled",
 		},
 		{
@@ -323,7 +338,7 @@ func TestProtectionLevelsAndUrisErrors(t *testing.T) {
 					return createEnabledCryptoKey(kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED), nil
 				},
 			},
-			kekInfos:          validKekInfos,
+			kekInfo:           validKekInfo,
 			expectedErrSubstr: "unspecified protection level",
 		},
 		{
@@ -339,17 +354,15 @@ func TestProtectionLevelsAndUrisErrors(t *testing.T) {
 					}, nil
 				},
 			},
-			kekInfos:          validKekInfos,
+			kekInfo:           validKekInfo,
 			expectedErrSubstr: "external protection level options",
 		},
 		{
 			name:          "KEK URI lacks GCP KMS identifying prefix",
 			fakeKmsClient: &fakeKeyManagementClient{},
-			kekInfos: []*configpb.KekInfo{
-				&configpb.KekInfo{
-					KekType: &configpb.KekInfo_KekUri{
-						KekUri: "invalid uri",
-					},
+			kekInfo: &configpb.KekInfo{
+				KekType: &configpb.KekInfo_KekUri{
+					KekUri: "invalid uri",
 				},
 			},
 			expectedErrSubstr: "expected URI prefix",
@@ -358,11 +371,10 @@ func TestProtectionLevelsAndUrisErrors(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			c := StetClient{kmsClient: testCase.fakeKmsClient}
-			_, err := c.protectionLevelsAndUris(ctx, testCase.kekInfos)
+			_, err := getKekURIMetadata(ctx, testCase.fakeKmsClient, testCase.kekInfo)
 
 			if err == nil {
-				t.Errorf("protectionLevelsAndUris(ctx, %v) returned no error, expected error related to \"%s\"", testCase.kekInfos, testCase.expectedErrSubstr)
+				t.Errorf("protectionLevelsAndUris(ctx, %v) returned no error, expected error related to \"%s\"", testCase.kekInfo, testCase.expectedErrSubstr)
 			}
 		})
 	}
@@ -817,12 +829,14 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 	}
 	ctx := context.Background()
 
+	expectedURIs := []string{testKEKURISoftware, testKEKURIHSM, testExternalKEKURI}
+
 	stetClient := &StetClient{
 		kmsClient:               &fakeKeyManagementClient{},
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
-	wrapped, _, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
+	wrapped, uris, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
 
 	if err != nil {
 		t.Fatalf("wrapShares(%s, %s) returned with error %v", sharesList, kekInfoList, err)
@@ -832,9 +846,17 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 		t.Fatalf("wrapShares(%s, %s) did not return the expected number of shares. Got %v, want %v", sharesList, kekInfoList, len(wrapped), len(sharesList))
 	}
 
+	if len(uris) != len(expectedURIs) {
+		t.Errorf("wrapShares(%s, %s) did not return the expected URIs. Got %v, want %v", sharesList, kekInfoList, len(uris), len(expectedURIs))
+	}
+
 	for i, w := range wrapped {
 		if !bytes.Equal(w.GetShare(), wrappedSharesList[i]) {
 			t.Errorf("wrapShares(%s, %s) did not return the expected wrapped share for share %v. Got %v, want %v", sharesList, kekInfoList, sharesList[i], w.GetShare(), wrappedSharesList[i])
+		}
+
+		if uris[i] != expectedURIs[i] {
+			t.Errorf("wrapShares(%s, %s) did not return the expected URI for share %v. Got %v, want %v", sharesList, kekInfoList, sharesList[i], uris[i], expectedURIs[i])
 		}
 	}
 }
