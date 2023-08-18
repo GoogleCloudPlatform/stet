@@ -22,9 +22,10 @@ import (
 	"os"
 	"testing"
 
-	"cloud.google.com/go/kms/apiv1"
+	"github.com/GoogleCloudPlatform/stet/client/cloudkms"
 	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/client/shares"
+	"github.com/GoogleCloudPlatform/stet/client/testutil"
 	"github.com/google/tink/go/subtle/random"
 	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/protobuf/proto"
@@ -32,38 +33,7 @@ import (
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	kmsrpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	kmsspb "google.golang.org/genproto/googleapis/cloud/kms/v1"
-	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
-
-const (
-	testKEKURI          = "gcp-kms://projects/test/locations/test/keyRings/test/cryptoKeys/test"
-	testKEKName         = "projects/test/locations/test/keyRings/test/cryptoKeys/test"
-	testKEKURIExternal  = "gcp-kms://projects/test/locations/test/keyRings/test/cryptoKeys/testExternal"
-	testExternalKEKURI  = "https://my-kms.io/external-key"
-	testExternalKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/testExternal"
-	testKEKURIHSM       = "gcp-kms://projects/test/locations/test/keyRings/test/cryptoKeys/testHsm"
-	testHSMKEKName      = "projects/test/locations/test/keyRings/test/cryptoKeys/testHsm"
-	testKEKURISoftware  = "gcp-kms://projects/test/locations/test/keyRings/test/cryptoKeys/testSoftware"
-	testSoftwareKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/testSoftware"
-)
-
-func createEnabledCryptoKey(protectionLevel kmsrpb.ProtectionLevel) *kmsrpb.CryptoKey {
-	ck := &kmsrpb.CryptoKey{
-		Primary: &kmsrpb.CryptoKeyVersion{
-			Name:            testKEKName,
-			State:           kmsrpb.CryptoKeyVersion_ENABLED,
-			ProtectionLevel: protectionLevel,
-		},
-	}
-
-	if protectionLevel == kmsrpb.ProtectionLevel_EXTERNAL {
-		ck.Primary.ExternalProtectionLevelOptions = &kmsrpb.ExternalProtectionLevelOptions{
-			ExternalKeyUri: testExternalKEKURI,
-		}
-	}
-
-	return ck
-}
 
 // Fake version of secure session client, used to communicate with external EKM.
 type fakeSecureSessionClient struct {
@@ -103,104 +73,6 @@ func (f *fakeSecureSessionClient) EndSession(ctx context.Context) error {
 	return nil
 }
 
-// Fake version of Cloud KMS Key Management client.
-type fakeKeyManagementClient struct {
-	kms.KeyManagementClient
-
-	getCryptoKeyFunc func(context.Context, *kmsspb.GetCryptoKeyRequest, ...gax.CallOption) (*kmsrpb.CryptoKey, error)
-	encryptFunc      func(context.Context, *kmsspb.EncryptRequest, ...gax.CallOption) (*kmsspb.EncryptResponse, error)
-	decryptFunc      func(context.Context, *kmsspb.DecryptRequest, ...gax.CallOption) (*kmsspb.DecryptResponse, error)
-}
-
-func fakeKMSProtectionLevel(name string) kmsrpb.ProtectionLevel {
-	switch name {
-	case testHSMKEKName:
-		return kmsrpb.ProtectionLevel_HSM
-	case testSoftwareKEKName:
-		return kmsrpb.ProtectionLevel_SOFTWARE
-	case testExternalKEKName:
-		return kmsrpb.ProtectionLevel_EXTERNAL
-	default:
-		return kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED
-	}
-}
-
-func (f *fakeKeyManagementClient) GetCryptoKey(ctx context.Context, req *kmsspb.GetCryptoKeyRequest, opts ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
-	if f.getCryptoKeyFunc != nil {
-		return f.getCryptoKeyFunc(ctx, req, opts...)
-	}
-
-	return createEnabledCryptoKey(fakeKMSProtectionLevel(req.GetName())), nil
-}
-
-func fakeKMSWrap(unwrapped []byte, name string) []byte {
-	switch name {
-	case testHSMKEKName:
-		return append(unwrapped, byte('H'))
-	case testSoftwareKEKName:
-		return append(unwrapped, byte('S'))
-	default:
-		return append(unwrapped, byte('U'))
-	}
-}
-
-func ValidEncryptResponse(req *kmsspb.EncryptRequest) *kmsspb.EncryptResponse {
-	wrappedShare := fakeKMSWrap(req.GetPlaintext(), req.GetName())
-
-	return &kmsspb.EncryptResponse{
-		Name:                    req.GetName(),
-		Ciphertext:              wrappedShare,
-		CiphertextCrc32C:        wrapperspb.Int64(int64(crc32c(wrappedShare))),
-		VerifiedPlaintextCrc32C: true,
-	}
-}
-
-func (f *fakeKeyManagementClient) Encrypt(ctx context.Context, req *kmsspb.EncryptRequest, opts ...gax.CallOption) (*kmsspb.EncryptResponse, error) {
-	if f.encryptFunc != nil {
-		return f.encryptFunc(ctx, req, opts...)
-	}
-
-	return ValidEncryptResponse(req), nil
-}
-
-func fakeKMSUnwrap(wrapped []byte, name string) []byte {
-	var final byte
-	switch name {
-	case testHSMKEKName:
-		final = 'H'
-	case testSoftwareKEKName:
-		final = 'S'
-	default:
-		final = 'U'
-	}
-
-	if wrapped[len(wrapped)-1] != final {
-		return []byte("nonsenseee")
-	}
-	return wrapped[:len(wrapped)-1]
-}
-
-func ValidDecryptResponse(req *kmsspb.DecryptRequest) *kmsspb.DecryptResponse {
-	unwrappedShare := fakeKMSUnwrap(req.GetCiphertext(), req.GetName())
-
-	return &kmsspb.DecryptResponse{
-		Plaintext:       unwrappedShare,
-		PlaintextCrc32C: wrapperspb.Int64(int64(crc32c(unwrappedShare))),
-	}
-}
-
-func (f *fakeKeyManagementClient) Decrypt(ctx context.Context, req *kmsspb.DecryptRequest, opts ...gax.CallOption) (*kmsspb.DecryptResponse, error) {
-	if f.decryptFunc != nil {
-		return f.decryptFunc(ctx, req, opts...)
-	}
-
-	return ValidDecryptResponse(req), nil
-}
-
-func (f *fakeKeyManagementClient) Close() error {
-	return nil
-}
-
 func TestParseEKMKeyURI(t *testing.T) {
 	keyURI := "https://test.ekm.io/endpoints/123456"
 	expectedAddr := "https://test.ekm.io"
@@ -233,33 +105,33 @@ func TestGetKekMetadata(t *testing.T) {
 			name:            "HSM Protection Level",
 			protectionLevel: kmsrpb.ProtectionLevel_HSM,
 			kekInfo: &configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{KekUri: testKEKURI + "1"},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI + "1"},
 			},
-			expectedURI: testKEKURI + "1",
+			expectedURI: testutil.TestKEKURI + "1",
 		},
 		{
 			name:            "Software Protection Level",
 			protectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
 			kekInfo: &configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{KekUri: testKEKURI + "2"},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI + "2"},
 			},
-			expectedURI: testKEKURI + "2",
+			expectedURI: testutil.TestKEKURI + "2",
 		},
 		{
 			name:            "External Protection Level",
 			protectionLevel: kmsrpb.ProtectionLevel_EXTERNAL,
 			kekInfo: &configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{KekUri: testKEKURI + "3"},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI + "3"},
 			},
-			expectedURI: testExternalKEKURI,
+			expectedURI: testutil.TestExternalKEKURI,
 		},
 	}
 
 	for _, tc := range testcases {
 		t.Run(tc.name, func(t *testing.T) {
-			kmsClient := &fakeKeyManagementClient{
-				getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
-					ck := createEnabledCryptoKey(tc.protectionLevel)
+			kmsClient := &testutil.FakeKeyManagementClient{
+				GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+					ck := testutil.CreateEnabledCryptoKey(tc.protectionLevel)
 					return ck, nil
 				},
 			}
@@ -281,8 +153,8 @@ func TestGetKekMetadataRSAFingerprint(t *testing.T) {
 		KekType: &configpb.KekInfo_RsaFingerprint{RsaFingerprint: testPublicFingerprint},
 	}
 
-	kmsClient := &fakeKeyManagementClient{
-		getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+	kmsClient := &testutil.FakeKeyManagementClient{
+		GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 			t.Fatalf("This should not be called.")
 			return nil, nil
 		},
@@ -296,19 +168,19 @@ func TestGetKekMetadataRSAFingerprint(t *testing.T) {
 func TestGetKekMetadataErrors(t *testing.T) {
 	ctx := context.Background()
 	validKekInfo := &configpb.KekInfo{
-		KekType: &configpb.KekInfo_KekUri{KekUri: testKEKURI},
+		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 	}
 
 	testCases := []struct {
 		name              string
-		fakeKmsClient     *fakeKeyManagementClient
+		fakeKmsClient     *testutil.FakeKeyManagementClient
 		kekInfo           *configpb.KekInfo
 		expectedErrSubstr string
 	}{
 		{
 			name: "GetCryptoKey returns error",
-			fakeKmsClient: &fakeKeyManagementClient{
-				getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+			fakeKmsClient: &testutil.FakeKeyManagementClient{
+				GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 					return nil, errors.New("this is an error from GetCryptoKey")
 				},
 			},
@@ -317,8 +189,8 @@ func TestGetKekMetadataErrors(t *testing.T) {
 		},
 		{
 			name: "Primary GetCryptoKeyVersion is not enabled",
-			fakeKmsClient: &fakeKeyManagementClient{
-				getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+			fakeKmsClient: &testutil.FakeKeyManagementClient{
+				GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 					return &kmsrpb.CryptoKey{
 						Primary: &kmsrpb.CryptoKeyVersion{
 							Name:            "projects/test/locations/test/keyRings/test/cryptoKeys/test/cryptoKeyVersions/test",
@@ -333,9 +205,9 @@ func TestGetKekMetadataErrors(t *testing.T) {
 		},
 		{
 			name: "Unspecified protection level",
-			fakeKmsClient: &fakeKeyManagementClient{
-				getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
-					return createEnabledCryptoKey(kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED), nil
+			fakeKmsClient: &testutil.FakeKeyManagementClient{
+				GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+					return testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED), nil
 				},
 			},
 			kekInfo:           validKekInfo,
@@ -343,8 +215,8 @@ func TestGetKekMetadataErrors(t *testing.T) {
 		},
 		{
 			name: "External protection level without ExternalProtectionLevelOptions",
-			fakeKmsClient: &fakeKeyManagementClient{
-				getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+			fakeKmsClient: &testutil.FakeKeyManagementClient{
+				GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 					return &kmsrpb.CryptoKey{
 						Primary: &kmsrpb.CryptoKeyVersion{
 							Name:            "projects/test/locations/test/keyRings/test/cryptoKeys/test/cryptoKeyVersions/test",
@@ -359,7 +231,7 @@ func TestGetKekMetadataErrors(t *testing.T) {
 		},
 		{
 			name:          "KEK URI lacks GCP KMS identifying prefix",
-			fakeKmsClient: &fakeKeyManagementClient{},
+			fakeKmsClient: &testutil.FakeKeyManagementClient{},
 			kekInfo: &configpb.KekInfo{
 				KekType: &configpb.KekInfo_KekUri{
 					KekUri: "invalid uri",
@@ -374,96 +246,7 @@ func TestGetKekMetadataErrors(t *testing.T) {
 			_, err := getKekURIMetadata(ctx, testCase.fakeKmsClient, testCase.kekInfo)
 
 			if err == nil {
-				t.Errorf("protectionLevelsAndUris(ctx, %v) returned no error, expected error related to \"%s\"", testCase.kekInfo, testCase.expectedErrSubstr)
-			}
-		})
-	}
-}
-
-func TestWrapKMSShareSucceeds(t *testing.T) {
-	testShare := []byte("Food share")
-	testCases := []struct {
-		name         string
-		kekName      string
-		expectedWrap []byte
-	}{
-		{
-			name:         "HSM",
-			kekName:      testHSMKEKName,
-			expectedWrap: fakeKMSWrap(testShare, testHSMKEKName),
-		},
-		{
-			name:         "Software",
-			kekName:      testSoftwareKEKName,
-			expectedWrap: fakeKMSWrap(testShare, testSoftwareKEKName),
-		},
-	}
-
-	ctx := context.Background()
-	fakeKMSClient := &fakeKeyManagementClient{}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			c := StetClient{kmsClient: fakeKMSClient}
-			wrappedShare, err := c.wrapKMSShare(ctx, testShare, testCase.kekName)
-			if err != nil {
-				t.Fatalf("wrapKMSShare(%v, %v) = %v error, want nil error", testShare, testCase.kekName, err)
-			}
-			if !bytes.Equal(wrappedShare, testCase.expectedWrap) {
-				t.Errorf("wrapKMSShare(%v, %v) = %v, want %v", testShare, testCase.kekName, wrappedShare, testCase.expectedWrap)
-			}
-		})
-	}
-}
-
-func TestWrapKMSShareFails(t *testing.T) {
-	plaintext := []byte("Plaintext")
-	testCases := []struct {
-		name            string
-		encryptResponse *kmsspb.EncryptResponse
-		encryptError    error
-	}{
-		{
-			name: "Plaintext corrupted",
-			encryptResponse: &kmsspb.EncryptResponse{
-				Name:                    testKEKName,
-				Ciphertext:              []byte("Ciphertext"),
-				CiphertextCrc32C:        wrapperspb.Int64(int64(crc32c([]byte("Ciphertext")))),
-				VerifiedPlaintextCrc32C: false,
-			},
-			encryptError: nil,
-		},
-		{
-			name: "Ciphertext corrupted",
-			encryptResponse: &kmsspb.EncryptResponse{
-				Name:                    testKEKName,
-				Ciphertext:              []byte("Ciphertext"),
-				CiphertextCrc32C:        wrapperspb.Int64(10),
-				VerifiedPlaintextCrc32C: true,
-			},
-			encryptError: nil,
-		},
-		{
-			name:            "Error from encrypt",
-			encryptResponse: nil,
-			encryptError:    errors.New("Service unavailable"),
-		},
-	}
-
-	ctx := context.Background()
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			fakeKMSClient := &fakeKeyManagementClient{
-				encryptFunc: func(_ context.Context, _ *kmsspb.EncryptRequest, _ ...gax.CallOption) (*kmsspb.EncryptResponse, error) {
-					return testCase.encryptResponse, testCase.encryptError
-				},
-			}
-
-			c := StetClient{kmsClient: fakeKMSClient}
-			_, err := c.wrapKMSShare(ctx, plaintext, testKEKName)
-
-			if err == nil {
-				t.Errorf("wrapKMSShare(%v, %v) = nil error, want error", plaintext, testKEKName)
+				t.Errorf("getKekMetadata returned no error, expected error related to \"%s\"", testCase.expectedErrSubstr)
 			}
 		})
 	}
@@ -472,7 +255,7 @@ func TestWrapKMSShareFails(t *testing.T) {
 func TestEkmSecureSessionWrap(t *testing.T) {
 	ctx := context.Background()
 	plaintext := []byte("this is plaintext")
-	md := kekMetadata{uri: testKEKURIExternal}
+	md := kekMetadata{uri: testutil.TestExternalCloudKEKURI}
 	expectedCiphertext := append(plaintext, byte('E'))
 
 	stetClient := &StetClient{fakeSecureSessionClient: &fakeSecureSessionClient{}}
@@ -525,7 +308,7 @@ func TestEkmSecureSessionWrapError(t *testing.T) {
 func TestEkmSecureSessionUnwrap(t *testing.T) {
 	ctx := context.Background()
 	expectedPlaintext := []byte("this is plaintext")
-	md := kekMetadata{uri: testKEKURIExternal}
+	md := kekMetadata{uri: testutil.TestExternalCloudKEKURI}
 	ciphertext := append(expectedPlaintext, byte('E'))
 
 	stetClient := &StetClient{fakeSecureSessionClient: &fakeSecureSessionClient{}}
@@ -568,9 +351,9 @@ func TestEkmSecureSessionUnwrapError(t *testing.T) {
 	for _, testCase := range testCases {
 		stetClient := &StetClient{fakeSecureSessionClient: testCase.fakeEkmClient}
 
-		_, err := stetClient.ekmSecureSessionUnwrap(ctx, []byte("this is ciphertext"), kekMetadata{uri: testKEKURIExternal})
+		_, err := stetClient.ekmSecureSessionUnwrap(ctx, []byte("this is ciphertext"), kekMetadata{uri: testutil.TestExternalCloudKEKURI})
 		if err == nil {
-			t.Errorf("ekmSecureSessionUnwrap(context.Background, \"this is ciphertext\", %v) returned no error, expected to return error related to %s", testKEKURIExternal, testCase.expectedErrSubstr)
+			t.Errorf("ekmSecureSessionUnwrap(context.Background, \"this is ciphertext\", %v) returned no error, expected to return error related to %s", testutil.TestExternalCloudKEKURI, testCase.expectedErrSubstr)
 		}
 	}
 }
@@ -587,19 +370,19 @@ func TestWrapSharesIndividually(t *testing.T) {
 	}{
 		{
 			name:            "Software Protection Level",
-			uri:             testKEKURISoftware,
+			uri:             testutil.TestSoftwareKEKURI,
 			protectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
-			expectedWrap:    fakeKMSWrap(testShare, testSoftwareKEKName),
+			expectedWrap:    testutil.FakeKMSWrap(testShare, testutil.TestSoftwareKEKName),
 		},
 		{
 			name:            "Hardware Protection Level",
-			uri:             testKEKURIHSM,
+			uri:             testutil.TestHSMKEKURI,
 			protectionLevel: kmsrpb.ProtectionLevel_HSM,
-			expectedWrap:    fakeKMSWrap(testShare, testHSMKEKName),
+			expectedWrap:    testutil.FakeKMSWrap(testShare, testutil.TestHSMKEKName),
 		},
 		{
 			name:            "External Protection Level",
-			uri:             testKEKURIExternal,
+			uri:             testutil.TestExternalCloudKEKURI,
 			protectionLevel: kmsrpb.ProtectionLevel_EXTERNAL,
 			expectedWrap:    append(testShare, byte('E')),
 		},
@@ -610,7 +393,9 @@ func TestWrapSharesIndividually(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			stetClient := &StetClient{
-				kmsClient:               &fakeKeyManagementClient{},
+				testKMSClients: &cloudkms.ClientFactory{
+					CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
+				},
 				fakeSecureSessionClient: &fakeSecureSessionClient{},
 			}
 
@@ -651,9 +436,7 @@ func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 
 	ki := []*configpb.KekInfo{
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_RsaFingerprint{
-				RsaFingerprint: testPublicFingerprint,
-			},
+			KekType: &configpb.KekInfo_RsaFingerprint{RsaFingerprint: testPublicFingerprint},
 		},
 	}
 
@@ -699,7 +482,7 @@ func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 	unwrappedShares, err := stetClient.unwrapAndValidateShares(ctx, wrappedShares, ki, keys)
 
 	if err != nil {
-		t.Fatalf("unwrapAndValidateShares retruned with error: %v", err)
+		t.Fatalf("unwrapAndValidateShares returned with error: %v", err)
 	}
 
 	if len(unwrappedShares) != 1 {
@@ -807,32 +590,28 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 	sharesList := [][]byte{[]byte("share1"), []byte("share2"), []byte("share3")}
 	kekInfoList := []*configpb.KekInfo{
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURISoftware,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestSoftwareKEKURI},
 		},
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURIHSM,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestHSMKEKURI},
 		},
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURIExternal,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestExternalCloudKEKURI},
 		},
 	}
 	wrappedSharesList := [][]byte{
-		fakeKMSWrap(sharesList[0], testSoftwareKEKName),
-		fakeKMSWrap(sharesList[1], testHSMKEKName),
+		testutil.FakeKMSWrap(sharesList[0], testutil.TestSoftwareKEKName),
+		testutil.FakeKMSWrap(sharesList[1], testutil.TestHSMKEKName),
 		append(sharesList[2], byte('E')),
 	}
 	ctx := context.Background()
 
-	expectedURIs := []string{testKEKURISoftware, testKEKURIHSM, testExternalKEKURI}
+	expectedURIs := []string{testutil.TestSoftwareKEKURI, testutil.TestHSMKEKURI, testutil.TestExternalKEKURI}
 
 	stetClient := &StetClient{
-		kmsClient:               &fakeKeyManagementClient{},
+		testKMSClients: &cloudkms.ClientFactory{
+			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
+		},
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
@@ -876,9 +655,7 @@ func TestWrapSharesError(t *testing.T) {
 			name:            "GetCryptoKey returns error",
 			unwrappedShares: [][]byte{[]byte("I am a wrapped share.")},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURI,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 			}},
 			ckErrReturn:       errors.New("this is an error"),
 			encryptErrReturn:  nil,
@@ -888,13 +665,11 @@ func TestWrapSharesError(t *testing.T) {
 			name:            "Primary CryptoKeyVersion is not enabled",
 			unwrappedShares: [][]byte{[]byte("I am a wrapped share.")},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURI,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 			}},
 			ckReturn: &kmsrpb.CryptoKey{
 				Primary: &kmsrpb.CryptoKeyVersion{
-					Name:            testKEKName,
+					Name:            testutil.TestKEKName,
 					State:           kmsrpb.CryptoKeyVersion_DISABLED,
 					ProtectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
 				},
@@ -907,11 +682,9 @@ func TestWrapSharesError(t *testing.T) {
 			name:            "Primary CryptoKeyVersion has unspecified protection level",
 			unwrappedShares: [][]byte{[]byte("I am a wrapped share.")},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURI,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 			}},
-			ckReturn:         createEnabledCryptoKey(kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED),
+			ckReturn:         testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED),
 			ckErrReturn:      nil,
 			encryptErrReturn: nil, expectedErrSubstr: "protection level",
 		},
@@ -919,11 +692,9 @@ func TestWrapSharesError(t *testing.T) {
 			name:            "Mismatched numbers of unwrapped shares and kekInfos",
 			unwrappedShares: [][]byte{[]byte("I am a wrapped share."), []byte("I am a wrapped share.")},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURI,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 			}},
-			ckReturn:          createEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE),
+			ckReturn:          testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE),
 			ckErrReturn:       nil,
 			fakeSSClient:      &fakeSecureSessionClient{},
 			encryptErrReturn:  nil,
@@ -933,11 +704,9 @@ func TestWrapSharesError(t *testing.T) {
 			name:            "protectionLevelsAndUris returns error",
 			unwrappedShares: [][]byte{[]byte("I am a wrapped share.")},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: "I am an invalid URI!",
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: "I am an invalid URI!"},
 			}},
-			ckReturn:          createEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE),
+			ckReturn:          testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE),
 			ckErrReturn:       nil,
 			fakeSSClient:      &fakeSecureSessionClient{},
 			encryptErrReturn:  nil,
@@ -947,11 +716,9 @@ func TestWrapSharesError(t *testing.T) {
 			name:            "ekmSecureSessionWrap returns error",
 			unwrappedShares: [][]byte{[]byte("I am a wrapped share.")},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURI,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 			}},
-			ckReturn: createEnabledCryptoKey(kmsrpb.ProtectionLevel_EXTERNAL),
+			ckReturn: testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_EXTERNAL),
 			fakeSSClient: &fakeSecureSessionClient{
 				wrapErr: errors.New("this is an error from ConfidentialWrap"),
 			},
@@ -961,11 +728,9 @@ func TestWrapSharesError(t *testing.T) {
 			name:            "Encrypt returns an error",
 			unwrappedShares: [][]byte{[]byte("I am a wrapped share.")},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURI,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 			}},
-			ckReturn:          createEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE),
+			ckReturn:          testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE),
 			ckErrReturn:       nil,
 			encryptErrReturn:  errors.New("encrypt error"),
 			expectedErrSubstr: "encrypt error",
@@ -976,17 +741,19 @@ func TestWrapSharesError(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			fakeKMSClient := &fakeKeyManagementClient{
-				getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+			fakeKMSClient := &testutil.FakeKeyManagementClient{
+				GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 					return testCase.ckReturn, testCase.ckErrReturn
 				},
-				encryptFunc: func(_ context.Context, req *kmsspb.EncryptRequest, _ ...gax.CallOption) (*kmsspb.EncryptResponse, error) {
-					return ValidEncryptResponse(req), testCase.encryptErrReturn
+				EncryptFunc: func(_ context.Context, req *kmsspb.EncryptRequest, _ ...gax.CallOption) (*kmsspb.EncryptResponse, error) {
+					return testutil.ValidEncryptResponse(req), testCase.encryptErrReturn
 				},
 			}
 
 			stetClient := &StetClient{
-				kmsClient:               fakeKMSClient,
+				testKMSClients: &cloudkms.ClientFactory{
+					CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
+				},
 				fakeSecureSessionClient: testCase.fakeSSClient,
 			}
 			_, _, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
@@ -1009,27 +776,27 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 	}{
 		{
 			name: "Software Protection Level",
-			uri:  testKEKURISoftware,
+			uri:  testutil.TestSoftwareKEKURI,
 			wrappedShare: []*configpb.WrappedShare{
 				&configpb.WrappedShare{
-					Share: fakeKMSWrap(expectedUnwrappedShare, testSoftwareKEKName),
+					Share: testutil.FakeKMSWrap(expectedUnwrappedShare, testutil.TestSoftwareKEKName),
 					Hash:  expectedHashedShare,
 				},
 			},
 		},
 		{
 			name: "Hardware Protection Level",
-			uri:  testKEKURIHSM,
+			uri:  testutil.TestHSMKEKURI,
 			wrappedShare: []*configpb.WrappedShare{
 				&configpb.WrappedShare{
-					Share: fakeKMSWrap(expectedUnwrappedShare, testHSMKEKName),
+					Share: testutil.FakeKMSWrap(expectedUnwrappedShare, testutil.TestHSMKEKName),
 					Hash:  expectedHashedShare,
 				},
 			},
 		},
 		{
 			name: "External Protection Level",
-			uri:  testKEKURIExternal,
+			uri:  testutil.TestExternalCloudKEKURI,
 			wrappedShare: []*configpb.WrappedShare{
 				&configpb.WrappedShare{
 					Share: append(expectedUnwrappedShare, byte('E')),
@@ -1042,7 +809,9 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 	ctx := context.Background()
 
 	stetClient := &StetClient{
-		kmsClient:               &fakeKeyManagementClient{},
+		testKMSClients: &cloudkms.ClientFactory{
+			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
+		},
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
@@ -1078,28 +847,22 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 	sharesList := [][]byte{share, share, share}
 	kekInfoList := []*configpb.KekInfo{
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURISoftware,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestSoftwareKEKURI},
 		},
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURIHSM,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestHSMKEKURI},
 		},
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURIExternal,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestExternalCloudKEKURI},
 		},
 	}
 	wrappedSharesList := []*configpb.WrappedShare{
 		{
-			Share: fakeKMSWrap(share, testSoftwareKEKName),
+			Share: testutil.FakeKMSWrap(share, testutil.TestSoftwareKEKName),
 			Hash:  shareHash,
 		},
 		{
-			Share: fakeKMSWrap(share, testHSMKEKName),
+			Share: testutil.FakeKMSWrap(share, testutil.TestHSMKEKName),
 			Hash:  shareHash,
 		},
 		{
@@ -1111,7 +874,10 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 	ctx := context.Background()
 
 	stetClient := &StetClient{
-		kmsClient:               &fakeKeyManagementClient{},
+		testKMSClients: &cloudkms.ClientFactory{
+			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
+		},
+
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
@@ -1137,7 +903,7 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 func TestUnwrapAndValidateSharesError(t *testing.T) {
 	testUnwrappedShare := []byte("I am an unwrapped share")
 	testWrappedShare := &configpb.WrappedShare{
-		Share: fakeKMSWrap(testUnwrappedShare, testSoftwareKEKName),
+		Share: testutil.FakeKMSWrap(testUnwrappedShare, testutil.TestSoftwareKEKName),
 		Hash:  shares.HashShare(testUnwrappedShare),
 	}
 
@@ -1153,9 +919,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			name:          "Mismatched numbers of unwrapped shares and KekInfos",
 			wrappedShares: []*configpb.WrappedShare{testWrappedShare, testWrappedShare},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURISoftware,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestSoftwareKEKURI},
 			}},
 			fakeSSClient:      &fakeSecureSessionClient{},
 			decryptErrReturn:  nil,
@@ -1165,9 +929,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			name:          "getProtectionLevelsAndUris returns error",
 			wrappedShares: []*configpb.WrappedShare{testWrappedShare},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: "I am an invalid URI!",
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: "I am an invalid URI!"},
 			}},
 			fakeSSClient:     &fakeSecureSessionClient{},
 			decryptErrReturn: nil,
@@ -1175,13 +937,11 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 		{
 			name: "Unwrapped share has an invalid hash",
 			wrappedShares: []*configpb.WrappedShare{&configpb.WrappedShare{
-				Share: fakeKMSWrap(testUnwrappedShare, testSoftwareKEKName),
+				Share: testutil.FakeKMSWrap(testUnwrappedShare, testutil.TestSoftwareKEKName),
 				Hash:  shares.HashShare([]byte("I am a random different share")),
 			}},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURISoftware,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestSoftwareKEKURI},
 			}},
 			fakeSSClient:     &fakeSecureSessionClient{},
 			decryptErrReturn: nil,
@@ -1190,9 +950,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			name:          "ekmSecureSessionUnwrap with secure session returns error",
 			wrappedShares: []*configpb.WrappedShare{testWrappedShare},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURI,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 			}},
 			decryptErrReturn: nil,
 			fakeSSClient: &fakeSecureSessionClient{
@@ -1203,9 +961,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			name:          "unwrapKMSShare returns error",
 			wrappedShares: []*configpb.WrappedShare{testWrappedShare},
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{
-					KekUri: testKEKURISoftware,
-				},
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestSoftwareKEKURI},
 			}},
 			decryptErrReturn: errors.New("service unavailable"),
 		},
@@ -1215,14 +971,16 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			fakeKmsClient := &fakeKeyManagementClient{
-				decryptFunc: func(_ context.Context, req *kmsspb.DecryptRequest, _ ...gax.CallOption) (*kmsspb.DecryptResponse, error) {
-					return ValidDecryptResponse(req), testCase.decryptErrReturn
+			fakeKmsClient := &testutil.FakeKeyManagementClient{
+				DecryptFunc: func(_ context.Context, req *kmsspb.DecryptRequest, _ ...gax.CallOption) (*kmsspb.DecryptResponse, error) {
+					return testutil.ValidDecryptResponse(req), testCase.decryptErrReturn
 				},
 			}
 
 			stetClient := &StetClient{
-				kmsClient:               fakeKmsClient,
+				testKMSClients: &cloudkms.ClientFactory{
+					CredsMap: map[string]cloudkms.Client{"": fakeKmsClient},
+				},
 				fakeSecureSessionClient: testCase.fakeSSClient,
 			}
 			shares, err := stetClient.unwrapAndValidateShares(ctx, testCase.wrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
@@ -1243,26 +1001,22 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 	sharesList := [][]byte{[]byte("share1"), []byte("share2"), []byte("share3")}
 	kekInfoList := []*configpb.KekInfo{
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURISoftware,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestSoftwareKEKURI},
 		},
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURIHSM,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestHSMKEKURI},
 		},
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURIExternal,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestExternalCloudKEKURI},
 		},
 	}
 
 	ctx := context.Background()
 
 	stetClient := &StetClient{
-		kmsClient:               &fakeKeyManagementClient{},
+		testKMSClients: &cloudkms.ClientFactory{
+			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
+		},
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
@@ -1290,9 +1044,7 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 	testBlobID := "I am blob."
 	kekInfo := &configpb.KekInfo{
-		KekType: &configpb.KekInfo_KekUri{
-			KekUri: testKEKURISoftware,
-		},
+		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestSoftwareKEKURI},
 	}
 
 	keyConfig := &configpb.KeyConfig{
@@ -1325,7 +1077,9 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 
 	ctx := context.Background()
 	stetClient := &StetClient{
-		kmsClient:               &fakeKeyManagementClient{},
+		testKMSClients: &cloudkms.ClientFactory{
+			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
+		},
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
@@ -1366,9 +1120,7 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 	testBlobID := "I am blob."
 	kekInfo := &configpb.KekInfo{
-		KekType: &configpb.KekInfo_KekUri{
-			KekUri: testKEKURISoftware,
-		},
+		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestSoftwareKEKURI},
 	}
 
 	keyConfig := configpb.KeyConfig{
@@ -1384,7 +1136,9 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 
 	ctx := context.Background()
 	stetClient := &StetClient{
-		kmsClient:               &fakeKeyManagementClient{},
+		testKMSClients: &cloudkms.ClientFactory{
+			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
+		},
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
@@ -1398,9 +1152,7 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 	testBlobID := "I am blob."
 	kekInfo := &configpb.KekInfo{
-		KekType: &configpb.KekInfo_KekUri{
-			KekUri: testKEKURI,
-		},
+		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 	}
 
 	shamirConfig := &configpb.ShamirConfig{
@@ -1437,14 +1189,16 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	fakeKMSClient := &fakeKeyManagementClient{
-		getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
-			return createEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
+	fakeKMSClient := &testutil.FakeKeyManagementClient{
+		GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+			return testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
 		},
 	}
 
 	stetClient := &StetClient{
-		kmsClient:               fakeKMSClient,
+		testKMSClients: &cloudkms.ClientFactory{
+			CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
+		},
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
@@ -1484,16 +1238,11 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 	testBlobID := "I am blob."
 	kekInfo := &configpb.KekInfo{
-		KekType: &configpb.KekInfo_KekUri{
-			KekUri: testKEKURI,
-		},
+		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 	}
 
 	// Invalid configuration due to threshold exceeding shares.
-	shamirConfig := configpb.ShamirConfig{
-		Threshold: 5,
-		Shares:    3,
-	}
+	shamirConfig := configpb.ShamirConfig{Threshold: 5, Shares: 3}
 
 	keyConfig := configpb.KeyConfig{
 		KekInfos:              []*configpb.KekInfo{kekInfo, kekInfo, kekInfo},
@@ -1507,14 +1256,16 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 	plaintext := []byte("This is data to be encrypted.")
 
 	ctx := context.Background()
-	fakeKMSClient := &fakeKeyManagementClient{
-		getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
-			return createEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
+	fakeKMSClient := &testutil.FakeKeyManagementClient{
+		GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+			return testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
 		},
 	}
 
 	stetClient := &StetClient{
-		kmsClient:               fakeKMSClient,
+		testKMSClients: &cloudkms.ClientFactory{
+			CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
+		},
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
@@ -1528,15 +1279,10 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 // Ensures Encrypt fills in a random blob ID if not provided in the config.
 func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 	kekInfo := &configpb.KekInfo{
-		KekType: &configpb.KekInfo_KekUri{
-			KekUri: testKEKURI,
-		},
+		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 	}
 
-	shamirConfig := configpb.ShamirConfig{
-		Threshold: 2,
-		Shares:    3,
-	}
+	shamirConfig := configpb.ShamirConfig{Threshold: 2, Shares: 3}
 
 	keyConfig := configpb.KeyConfig{
 		KekInfos:              []*configpb.KekInfo{kekInfo, kekInfo, kekInfo},
@@ -1555,13 +1301,15 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 	plaintext := []byte("This is data to be encrypted.")
 
 	ctx := context.Background()
-	fakeKMSClient := &fakeKeyManagementClient{
-		getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
-			return createEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
+	fakeKMSClient := &testutil.FakeKeyManagementClient{
+		GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+			return testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
 		},
 	}
 	stetClient := &StetClient{
-		kmsClient:               fakeKMSClient,
+		testKMSClients: &cloudkms.ClientFactory{
+			CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
+		},
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
@@ -1605,81 +1353,6 @@ func TestEncryptFailsWithNilConfig(t *testing.T) {
 	}
 }
 
-func TestUnwrapKMSShareSucceeds(t *testing.T) {
-	expectedShare := []byte("Google, let me into the office for fooooddd")
-	testCases := []struct {
-		name    string
-		kekName string
-	}{
-		{
-			name:    "HSM",
-			kekName: testHSMKEKName,
-		},
-		{
-			name:    "Software",
-			kekName: testSoftwareKEKName,
-		},
-	}
-
-	ctx := context.Background()
-	fakeKMSClient := &fakeKeyManagementClient{}
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			wrappedShare := fakeKMSWrap(expectedShare, testCase.kekName)
-			c := StetClient{kmsClient: fakeKMSClient}
-			unwrappedShare, err := c.unwrapKMSShare(ctx, wrappedShare, testCase.kekName)
-			if err != nil {
-				t.Fatalf("unwrapKMSShare(ctx, %v, %v) = %v error, want nil error", wrappedShare, testCase.kekName, err)
-			}
-			if !bytes.Equal(unwrappedShare, expectedShare) {
-				t.Errorf("unwrapKMSShare(ctx, %v, %v) = %v, want %v", wrappedShare, testCase.kekName, unwrappedShare, expectedShare)
-			}
-		})
-	}
-}
-
-func TestUnwrapKMSShareFails(t *testing.T) {
-	plaintext := []byte("Plaintext")
-	testCases := []struct {
-		name            string
-		decryptResponse *kmsspb.DecryptResponse
-		decryptError    error
-	}{
-		{
-			name: "Plaintext corrupted",
-			decryptResponse: &kmsspb.DecryptResponse{
-				Plaintext:       []byte("Plaintext"),
-				PlaintextCrc32C: wrapperspb.Int64(10),
-			},
-			decryptError: nil,
-		},
-		{
-			name:            "Error from decrypt",
-			decryptResponse: nil,
-			decryptError:    errors.New("Service unavailable"),
-		},
-	}
-
-	ctx := context.Background()
-
-	for _, testCase := range testCases {
-		t.Run(testCase.name, func(t *testing.T) {
-			fakeKMSClient := &fakeKeyManagementClient{
-				decryptFunc: func(_ context.Context, _ *kmsspb.DecryptRequest, _ ...gax.CallOption) (*kmsspb.DecryptResponse, error) {
-					return testCase.decryptResponse, testCase.decryptError
-				},
-			}
-
-			c := StetClient{kmsClient: fakeKMSClient}
-			_, err := c.unwrapKMSShare(ctx, plaintext, testKEKName)
-
-			if err == nil {
-				t.Errorf("unwrapKMSShare(ctx, %v, %v) = nil error, want error", plaintext, testKEKName)
-			}
-		})
-	}
-}
-
 // Tests Decrypt with various error cases.
 func TestDecryptErrors(t *testing.T) {
 	ciphertext := []byte("I am ciphertext.")
@@ -1691,14 +1364,10 @@ func TestDecryptErrors(t *testing.T) {
 
 	kekInfos := []*configpb.KekInfo{
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURI,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 		},
 		&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURI,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 		},
 	}
 
@@ -1727,9 +1396,7 @@ func TestDecryptErrors(t *testing.T) {
 
 	singleURIKeyCfg := configpb.KeyConfig{
 		KekInfos: []*configpb.KekInfo{&configpb.KekInfo{
-			KekType: &configpb.KekInfo_KekUri{
-				KekUri: testKEKURI,
-			},
+			KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 		}},
 		DekAlgorithm:          configpb.DekAlgorithm_AES256_GCM,
 		KeySplittingAlgorithm: &configpb.KeyConfig_Shamir{&shamirConfig},
@@ -1793,13 +1460,15 @@ func TestDecryptErrors(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	fakeKMSClient := &fakeKeyManagementClient{
-		getCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
-			return createEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
+	fakeKMSClient := &testutil.FakeKeyManagementClient{
+		GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+			return testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE), nil
 		},
 	}
 
-	stetClient := StetClient{kmsClient: fakeKMSClient}
+	stetClient := StetClient{
+		testKMSClients: &cloudkms.ClientFactory{CredsMap: map[string]cloudkms.Client{"": fakeKMSClient}},
+	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {

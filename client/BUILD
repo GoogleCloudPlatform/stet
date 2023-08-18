@@ -29,6 +29,7 @@ go_library(
     ],
     importpath = "github.com/GoogleCloudPlatform/stet/client",
     deps = [
+        "//client/cloudkms",
         "//client/jwt",
         "//client/securesession",
         "//client/shares",
@@ -36,12 +37,8 @@ go_library(
         "@com_github_golang_glog//:glog",
         "@com_github_google_tink_go//streamingaead/subtle:go_default_library",
         "@com_github_google_uuid//:uuid",
-        "@com_github_googleapis_gax_go_v2//:go_default_library",
-        "@com_google_cloud_go//kms/apiv1:go_default_library",
         "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
-        "@org_golang_google_api//option:go_default_library",
         "@org_golang_google_protobuf//proto",
-        "@org_golang_google_protobuf//types/known/wrapperspb",
     ],
 )
 
@@ -55,14 +52,14 @@ go_test(
     ],
     embed = [":client"],
     deps = [
+        "//client/cloudkms",
         "//client/securesession",
         "//client/shares",
+        "//client/testutil",
         "//proto:config_go_proto",
         "@com_github_google_tink_go//subtle/random:go_default_library",
         "@com_github_googleapis_gax_go_v2//:go_default_library",
-        "@com_google_cloud_go//kms/apiv1:go_default_library",
         "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
         "@org_golang_google_protobuf//proto",
-        "@org_golang_google_protobuf//types/known/wrapperspb",
     ],
 )

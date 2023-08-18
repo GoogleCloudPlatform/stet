@@ -263,6 +263,13 @@ go_repository(
     version = "v0.0.14"
 )
 
+go_repository(
+    name = "com_github_google_go_cmp",
+    importpath = "github.com/google/go-cmp",
+    sum = "h1:e6P7q2lk1O+qJJb4BtCQXlK8vWEO8V1ZeuEdJNOqZyg=",
+    version = "v0.5.8",
+)
+
 # General go toolchain dependencies
 load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
 go_rules_dependencies()

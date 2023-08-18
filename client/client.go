@@ -21,25 +21,21 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"fmt"
-	"hash/crc32"
 	"io"
 	"net/url"
 	"path"
 	"strings"
 
-	"cloud.google.com/go/kms/apiv1"
+	"github.com/GoogleCloudPlatform/stet/client/cloudkms"
 	"github.com/GoogleCloudPlatform/stet/client/jwt"
 	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/client/shares"
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	glog "github.com/golang/glog"
 	"github.com/google/uuid"
-	"github.com/googleapis/gax-go/v2"
-	"google.golang.org/api/option"
 	rpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	spb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	"google.golang.org/protobuf/proto"
-	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 const (
@@ -53,13 +49,6 @@ type StetMetadata struct {
 	BlobID  string
 }
 
-type cloudKMSClient interface {
-	GetCryptoKey(context.Context, *spb.GetCryptoKeyRequest, ...gax.CallOption) (*rpb.CryptoKey, error)
-	Encrypt(context.Context, *spb.EncryptRequest, ...gax.CallOption) (*spb.EncryptResponse, error)
-	Decrypt(context.Context, *spb.DecryptRequest, ...gax.CallOption) (*spb.DecryptResponse, error)
-	Close() error
-}
-
 type secureSessionClient interface {
 	ConfidentialWrap(ctx context.Context, keyPath string, resourceName string, plaintext []byte) ([]byte, error)
 	ConfidentialUnwrap(ctx context.Context, keyPath string, resourceName string, wrappedBlob []byte) ([]byte, error)
@@ -68,8 +57,8 @@ type secureSessionClient interface {
 
 // StetClient provides Encryption and Decryption services through the Split Trust Encryption Tool.
 type StetClient struct {
-	// Client for performing Cloud KMS operations. Initialized via initializeKMSClient.
-	kmsClient cloudKMSClient
+	// Contains test KMS clients.
+	testKMSClients *cloudkms.ClientFactory
 
 	// Fake Secure Session Client for testing purposes.
 	fakeSecureSessionClient secureSessionClient
@@ -80,32 +69,6 @@ type StetClient struct {
 	// The version of STET, if set. This is used to construct user agent
 	// strings for Cloud KMS requests.
 	Version string
-}
-
-// initializeKMSClient initializes the StetClient's `kmsClient`.
-// Performs a no-op if it has already been initialized.
-func (c *StetClient) initializeKMSClient(ctx context.Context) error {
-	// Don't double-initialize a real KMS client.
-	if c.kmsClient != nil {
-		return nil
-	}
-
-	var err error
-
-	// Set user agent for Cloud KMS API calls.
-	ua := "STET/"
-	if c.Version != "" {
-		ua += c.Version
-	} else {
-		ua += "dev"
-	}
-
-	c.kmsClient, err = kms.NewKeyManagementClient(ctx, option.WithUserAgent(ua))
-	if err != nil {
-		return fmt.Errorf("error creating KMS client: %v", err)
-	}
-
-	return nil
 }
 
 // parseEKMKeyURI takes in the key URI for a key stored in an EKM, and returns
@@ -188,33 +151,6 @@ func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []
 	return unwrappedBlob, nil
 }
 
-func crc32c(data []byte) uint32 {
-	t := crc32.MakeTable(crc32.Castagnoli)
-	return crc32.Checksum(data, t)
-}
-
-// wrapKMSShare uses a KMS client to wrap the given share using Cloud KMS.
-func (c *StetClient) wrapKMSShare(ctx context.Context, share []byte, keyName string) ([]byte, error) {
-	req := &spb.EncryptRequest{
-		Name:            keyName,
-		Plaintext:       share,
-		PlaintextCrc32C: wrapperspb.Int64(int64(crc32c(share))),
-	}
-
-	result, err := c.kmsClient.Encrypt(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encrypt: %v", err)
-	}
-
-	if !result.VerifiedPlaintextCrc32C {
-		return nil, fmt.Errorf("Encrypt: request corrupted in-transit")
-	}
-	if int64(crc32c(result.Ciphertext)) != result.CiphertextCrc32C.Value {
-		return nil, fmt.Errorf("Encrypt: response corrupted in-transit")
-	}
-	return result.Ciphertext, nil
-}
-
 type kekMetadata struct {
 	protectionLevel rpb.ProtectionLevel
 	uri             string
@@ -222,7 +158,7 @@ type kekMetadata struct {
 }
 
 // Retrieves the metadata of a CloudKMS KEK URI.
-func getKekURIMetadata(ctx context.Context, kmsClient cloudKMSClient, kekInfo *configpb.KekInfo) (*kekMetadata, error) {
+func getKekURIMetadata(ctx context.Context, kmsClient cloudkms.Client, kekInfo *configpb.KekInfo) (*kekMetadata, error) {
 	_, ok := kekInfo.GetKekType().(*configpb.KekInfo_KekUri)
 	// No-op if this does not describe a KEK URI.
 	if !ok {
@@ -279,6 +215,14 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 		return nil, nil, fmt.Errorf("number of shares to wrap (%d) does not match number of KEKs (%d)", len(unwrappedShares), len(kekInfos))
 	}
 
+	var kmsClients *cloudkms.ClientFactory
+	if c.testKMSClients != nil {
+		kmsClients = c.testKMSClients
+	} else {
+		kmsClients = cloudkms.NewClientFactory(c.Version)
+	}
+	defer kmsClients.Close()
+
 	for i, share := range unwrappedShares {
 		wrapped := &configpb.WrappedShare{
 			Hash: shares.HashShare(share),
@@ -299,13 +243,13 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 			}
 
 		case *configpb.KekInfo_KekUri:
-			// Instantiate `kmsClient` if not already done.
-			if err := c.initializeKMSClient(ctx); err != nil {
-				return nil, nil, fmt.Errorf("error initializing KMS Client: %v", err)
+			creds := ""
+			kmsClient, err := kmsClients.Client(ctx, creds)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error initializing Cloud KMS Client with credentials \"%v\": %v", creds, err)
 			}
-			defer c.kmsClient.Close()
 
-			kmd, err := getKekURIMetadata(ctx, c.kmsClient, kek)
+			kmd, err := getKekURIMetadata(ctx, kmsClient, kek)
 			if err != nil {
 				return nil, nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
 			}
@@ -314,7 +258,12 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 			switch pl := kmd.protectionLevel; pl {
 			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
 				var err error
-				wrapped.Share, err = c.wrapKMSShare(ctx, share, kmd.resourceName)
+
+				wrapOpts := cloudkms.WrapOpts{
+					Share:   share,
+					KeyName: kmd.resourceName,
+				}
+				wrapped.Share, err = cloudkms.WrapShare(ctx, kmsClient, wrapOpts)
 				if err != nil {
 					return nil, nil, fmt.Errorf("error wrapping key share: %v", err)
 				}
@@ -343,30 +292,18 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, k
 	return wrappedShares, keyURIs, nil
 }
 
-// unwrapKMSShare uses a KMS client to unwrap the given share using Cloud KMS.
-func (c *StetClient) unwrapKMSShare(ctx context.Context, wrappedShare []byte, keyName string) ([]byte, error) {
-	req := &spb.DecryptRequest{
-		Name:             keyName,
-		Ciphertext:       wrappedShare,
-		CiphertextCrc32C: wrapperspb.Int64(int64(crc32c(wrappedShare))),
-	}
-
-	result, err := c.kmsClient.Decrypt(ctx, req)
-	if err != nil {
-		return nil, fmt.Errorf("failed to decrypt ciphertext: %v", err)
-	}
-
-	if int64(crc32c(result.Plaintext)) != result.PlaintextCrc32C.Value {
-		return nil, fmt.Errorf("Decrypt: response corrupted in-transit")
-	}
-	return result.Plaintext, nil
-}
-
 // unwrapAndValidateShares decrypts the given wrapped share based on its URI.
 func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares []*configpb.WrappedShare, kekInfos []*configpb.KekInfo, keys *configpb.AsymmetricKeys) ([]shares.UnwrappedShare, error) {
 	if len(wrappedShares) != len(kekInfos) {
 		return nil, fmt.Errorf("number of shares to unwrap (%d) does not match number of KEKs (%d)", len(wrappedShares), len(kekInfos))
 	}
+	var kmsClients *cloudkms.ClientFactory
+	if c.testKMSClients != nil {
+		kmsClients = c.testKMSClients
+	} else {
+		kmsClients = cloudkms.NewClientFactory(c.Version)
+	}
+	defer kmsClients.Close()
 
 	// In order to support k-of-n decryption, don't exit early if share
 	// share unwrapping fails. Attempt to unwrap all shares and just
@@ -393,14 +330,13 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 			}
 
 		case *configpb.KekInfo_KekUri:
-			// Instantiate `kmsClient` if not already done.
-			if err := c.initializeKMSClient(ctx); err != nil {
-				glog.Warningf("Error initializing Cloud KMS Client: %v", err)
-				continue
+			creds := ""
+			kmsClient, err := kmsClients.Client(ctx, creds)
+			if err != nil {
+				return nil, fmt.Errorf("error initializing Cloud KMS Client with credentials \"%v\": %v", creds, err)
 			}
-			defer c.kmsClient.Close()
 
-			kmd, err := getKekURIMetadata(ctx, c.kmsClient, kek)
+			kmd, err := getKekURIMetadata(ctx, kmsClient, kek)
 			if err != nil {
 				return nil, fmt.Errorf("Error retrieving KEK Metadata: %v", err)
 			}
@@ -408,7 +344,11 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 			// Unwrap share via KMS.
 			switch pl := kmd.protectionLevel; pl {
 			case rpb.ProtectionLevel_SOFTWARE, rpb.ProtectionLevel_HSM:
-				unwrapped.Share, err = c.unwrapKMSShare(ctx, wrapped.GetShare(), kmd.resourceName)
+				unwrapOpts := cloudkms.UnwrapOpts{
+					Share:   wrapped.GetShare(),
+					KeyName: kmd.resourceName,
+				}
+				unwrapped.Share, err = cloudkms.UnwrapShare(ctx, kmsClient, unwrapOpts)
 				if err != nil {
 					glog.Warningf("Error unwrapping key share: %v", err)
 					continue
