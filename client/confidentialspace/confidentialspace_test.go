@@ -18,6 +18,8 @@ import (
 	"os"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/stet/client/testutil"
+
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 )
 
@@ -55,7 +57,7 @@ func TestFileExists(t *testing.T) {
 
 func TestFindMatchingCredentials(t *testing.T) {
 	// Create token file.
-	tokenFile := createTempTokenFile(t)
+	tokenFile := testutil.CreateTempTokenFile(t)
 
 	testCfg := &configpb.ConfidentialSpaceConfigs{
 		KekCredentials: []*configpb.KekCredentialConfig{
@@ -149,7 +151,7 @@ func TestFindMatchingCredentialsWithoutConfidentialSpace(t *testing.T) {
 // Tests scenarios where we don't expect FindMatchingCredentials to return a match.
 func TestFindMatchingCredentialsWithoutMatch(t *testing.T) {
 	// Create token file.
-	tokenFile := createTempTokenFile(t)
+	tokenFile := testutil.CreateTempTokenFile(t)
 
 	testCfg := &configpb.ConfidentialSpaceConfigs{
 		KekCredentials: []*configpb.KekCredentialConfig{

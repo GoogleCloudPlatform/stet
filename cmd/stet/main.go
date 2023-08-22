@@ -159,7 +159,7 @@ func (e *encryptCmd) SetFlags(f *flag.FlagSet) {
 	f.BoolVar(&e.quiet, "quiet", false, "Suppress logging output.")
 }
 
-func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) subcommands.ExitStatus {
 	yamlBytes, err := os.ReadFile(e.configFile)
 	if err != nil {
 		glog.Errorf("Failed to read config file: %v", err.Error())
@@ -227,7 +227,7 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		Version:            version,
 	}
 
-	md, err := c.Encrypt(ctx, inFile, outFile, stetConfig.GetEncryptConfig(), stetConfig.GetAsymmetricKeys(), e.blobID)
+	md, err := c.Encrypt(ctx, inFile, outFile, stetConfig, e.blobID)
 	if err != nil {
 		glog.Errorf("Failed to encrypt plaintext: %v", err.Error())
 		return subcommands.ExitFailure
@@ -325,7 +325,7 @@ func (d *decryptCmd) SetFlags(f *flag.FlagSet) {
 	f.BoolVar(&d.quiet, "quiet", false, "Suppress logging output.")
 }
 
-func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interface{}) subcommands.ExitStatus {
+func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) subcommands.ExitStatus {
 	yamlBytes, err := os.ReadFile(d.configFile)
 	if err != nil {
 		glog.Errorf("Failed to read config file: %v", err.Error())
@@ -392,7 +392,7 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...interfac
 		Version:            version,
 	}
 
-	md, err := c.Decrypt(ctx, inFile, outFile, stetConfig.GetDecryptConfig(), stetConfig.GetAsymmetricKeys())
+	md, err := c.Decrypt(ctx, inFile, outFile, stetConfig)
 	if err != nil {
 		glog.Errorf("Failed to decrypt ciphertext: %v", err.Error())
 		return subcommands.ExitFailure
@@ -430,7 +430,7 @@ func (*versionCmd) Name() string           { return "version" }
 func (*versionCmd) Synopsis() string       { return "prints the current version" }
 func (*versionCmd) Usage() string          { return "Usage: stet version" }
 func (*versionCmd) SetFlags(*flag.FlagSet) {}
-func (*versionCmd) Execute(context.Context, *flag.FlagSet, ...interface{}) subcommands.ExitStatus {
+func (*versionCmd) Execute(context.Context, *flag.FlagSet, ...any) subcommands.ExitStatus {
 	if version == "" {
 		fmt.Println("Version: development")
 	} else {

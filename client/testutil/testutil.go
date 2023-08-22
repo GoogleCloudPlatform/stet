@@ -18,6 +18,8 @@ package testutil
 import (
 	"context"
 	"hash/crc32"
+	"os"
+	"testing"
 
 	"cloud.google.com/go/kms/apiv1"
 	"github.com/googleapis/gax-go/v2"
@@ -52,7 +54,20 @@ var (
 	TestSoftwareKEKURI = gcpKMSPrefix + TestSoftwareKEKName
 )
 
-func crc32c(data []byte) uint32 {
+// CreateTempTokenFile creates a temp directory/file as a stand-in for the attestation token.
+func CreateTempTokenFile(t *testing.T) string {
+	// Create token file.
+	tempDir := t.TempDir()
+	tokenFile := tempDir + "test_token"
+	if err := os.WriteFile(tokenFile, []byte("test token"), 0755); err != nil {
+		t.Fatalf("Error creating token file at %v: %v", tokenFile, err)
+	}
+
+	return tokenFile
+}
+
+// CRC32C returns the Castagnoli CRC32 checksum of the given data.
+func CRC32C(data []byte) uint32 {
 	t := crc32.MakeTable(crc32.Castagnoli)
 	return crc32.Checksum(data, t)
 }
@@ -125,7 +140,7 @@ func ValidEncryptResponse(req *kmsspb.EncryptRequest) *kmsspb.EncryptResponse {
 	return &kmsspb.EncryptResponse{
 		Name:                    req.GetName(),
 		Ciphertext:              wrappedShare,
-		CiphertextCrc32C:        wrapperspb.Int64(int64(crc32c(wrappedShare))),
+		CiphertextCrc32C:        wrapperspb.Int64(int64(CRC32C(wrappedShare))),
 		VerifiedPlaintextCrc32C: true,
 	}
 }
@@ -163,7 +178,7 @@ func ValidDecryptResponse(req *kmsspb.DecryptRequest) *kmsspb.DecryptResponse {
 
 	return &kmsspb.DecryptResponse{
 		Plaintext:       unwrappedShare,
-		PlaintextCrc32C: wrapperspb.Int64(int64(crc32c(unwrappedShare))),
+		PlaintextCrc32C: wrapperspb.Int64(int64(CRC32C(unwrappedShare))),
 	}
 }
 

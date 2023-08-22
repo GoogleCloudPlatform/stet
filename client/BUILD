@@ -30,6 +30,7 @@ go_library(
     importpath = "github.com/GoogleCloudPlatform/stet/client",
     deps = [
         "//client/cloudkms",
+        "//client/confidentialspace",
         "//client/jwt",
         "//client/securesession",
         "//client/shares",
@@ -53,6 +54,7 @@ go_test(
     embed = [":client"],
     deps = [
         "//client/cloudkms",
+        "//client/confidentialspace",
         "//client/securesession",
         "//client/shares",
         "//client/testutil",
@@ -61,5 +63,6 @@ go_test(
         "@com_github_googleapis_gax_go_v2//:go_default_library",
         "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
         "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//types/known/wrapperspb",
     ],
 )

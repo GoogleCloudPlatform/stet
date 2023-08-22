@@ -32,5 +32,8 @@ go_test(
     name = "confidentialspace_test",
     srcs = ["confidentialspace_test.go"],
     embed = [":confidentialspace"],
-    deps = ["//proto:config_go_proto"],
+    deps = [
+        "//client/testutil",
+        "//proto:config_go_proto",
+    ],
 )

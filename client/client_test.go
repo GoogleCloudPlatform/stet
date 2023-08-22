@@ -23,6 +23,7 @@ import (
 	"testing"
 
 	"github.com/GoogleCloudPlatform/stet/client/cloudkms"
+	confspace "github.com/GoogleCloudPlatform/stet/client/confidentialspace"
 	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/client/shares"
 	"github.com/GoogleCloudPlatform/stet/client/testutil"
@@ -33,6 +34,7 @@ import (
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	kmsrpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	kmsspb "google.golang.org/genproto/googleapis/cloud/kms/v1"
+	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 
 // Fake version of secure session client, used to communicate with external EKM.
@@ -407,7 +409,8 @@ func TestWrapSharesIndividually(t *testing.T) {
 				},
 			}
 
-			wrappedShares, _, err := stetClient.wrapShares(ctx, [][]byte{testShare}, ki, &configpb.AsymmetricKeys{})
+			opts := sharesOpts{kekInfos: ki, asymmetricKeys: &configpb.AsymmetricKeys{}}
+			wrappedShares, _, err := stetClient.wrapShares(ctx, [][]byte{testShare}, opts)
 
 			if err != nil {
 				t.Fatalf("wrapShares returned with error: %v", err)
@@ -461,7 +464,8 @@ func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 	}
 
 	var stetClient StetClient
-	wrappedShares, keyURIs, err := stetClient.wrapShares(ctx, [][]byte{testShare}, ki, keys)
+	opts := sharesOpts{kekInfos: ki, asymmetricKeys: keys}
+	wrappedShares, keyURIs, err := stetClient.wrapShares(ctx, [][]byte{testShare}, opts)
 
 	if err != nil {
 		t.Fatalf("wrapShares returned with error: %v", err)
@@ -479,7 +483,7 @@ func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 		t.Fatalf("wrapShares(ctx, %s, %v) expected to return 0 key URIs, got %v", testShare, ki, len(keyURIs))
 	}
 
-	unwrappedShares, err := stetClient.unwrapAndValidateShares(ctx, wrappedShares, ki, keys)
+	unwrappedShares, err := stetClient.unwrapAndValidateShares(ctx, wrappedShares, opts)
 
 	if err != nil {
 		t.Fatalf("unwrapAndValidateShares returned with error: %v", err)
@@ -570,13 +574,14 @@ func TestWrapUnwrapShareAsymmetricKeyError(t *testing.T) {
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
 			var stetClient StetClient
-			wrappedShares, _, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, testCase.kekInfos, testCase.asymmetricKeys)
+			opts := sharesOpts{kekInfos: testCase.kekInfos, asymmetricKeys: testCase.asymmetricKeys}
+			wrappedShares, _, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, opts)
 
 			if err == nil && testCase.errorOnWrap {
 				t.Errorf("wrapShares(%s, %s) expected to return error, but did not", testCase.unwrappedShares, testCase.kekInfos)
 			}
 
-			_, err = stetClient.unwrapAndValidateShares(ctx, wrappedShares, testCase.kekInfos, testCase.asymmetricKeys)
+			_, err = stetClient.unwrapAndValidateShares(ctx, wrappedShares, opts)
 
 			if err == nil {
 				t.Errorf("unwrapAndValidateShares(%s, %s, %v) expected to return error, but did not", wrappedShares, testCase.kekInfos, testCase.asymmetricKeys)
@@ -615,7 +620,8 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
-	wrapped, uris, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
+	wrapOpts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
+	wrapped, uris, err := stetClient.wrapShares(ctx, sharesList, wrapOpts)
 
 	if err != nil {
 		t.Fatalf("wrapShares(%s, %s) returned with error %v", sharesList, kekInfoList, err)
@@ -636,6 +642,104 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 
 		if uris[i] != expectedURIs[i] {
 			t.Errorf("wrapShares(%s, %s) did not return the expected URI for share %v. Got %v, want %v", sharesList, kekInfoList, sharesList[i], uris[i], expectedURIs[i])
+		}
+	}
+}
+
+func TestWrapSharesWithConfidentialSpace(t *testing.T) {
+	ctx := context.Background()
+	tokenFile := testutil.CreateTempTokenFile(t)
+
+	// Define three test KEKs, each of which should map to a different KMS client.
+	keks := []struct {
+		kekURI         string
+		plaintext      []byte
+		expectedSuffix []byte
+	}{
+		{"gcp-kms://test-kek-0", []byte("Share 0"), []byte("-with-credentials")},
+		{"gcp-kms://test-kek-1", []byte("Share 1"), []byte("-wip-only-credentials")},
+		{"gcp-kms://test-kek-2", []byte("Share 2"), []byte("-no-credentials")},
+	}
+
+	// Define credentials for only the KEKs that require them.
+	csProto := &configpb.ConfidentialSpaceConfigs{
+		KekCredentials: []*configpb.KekCredentialConfig{
+			{
+				// A set of credentials.
+				KekUriPattern:  keks[0].kekURI,
+				WipName:        "test WIP name",
+				ServiceAccount: "test@system.gserviceaccount.com",
+			},
+			{
+				// Same credentials, but without service account.
+				KekUriPattern: keks[1].kekURI,
+				WipName:       "test WIP name",
+			},
+		},
+	}
+
+	createFakeKMSClient := func(index int) *testutil.FakeKeyManagementClient {
+		return &testutil.FakeKeyManagementClient{
+			GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+				return &kmsrpb.CryptoKey{
+					Primary: &kmsrpb.CryptoKeyVersion{
+						Name:            req.GetName(),
+						State:           kmsrpb.CryptoKeyVersion_ENABLED,
+						ProtectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
+					},
+				}, nil
+			},
+			EncryptFunc: func(_ context.Context, req *kmsspb.EncryptRequest, _ ...gax.CallOption) (*kmsspb.EncryptResponse, error) {
+				wrappedShare := append(req.GetPlaintext(), keks[index].expectedSuffix...)
+
+				return &kmsspb.EncryptResponse{
+					Name:                    req.GetName(),
+					Ciphertext:              wrappedShare,
+					CiphertextCrc32C:        wrapperspb.Int64(int64(testutil.CRC32C(wrappedShare))),
+					VerifiedPlaintextCrc32C: true,
+				}, nil
+			},
+		}
+	}
+
+	// Define a fake Client for each KEK credentials (including no credentials).
+	kmsClients := cloudkms.ClientFactory{
+		CredsMap: map[string]cloudkms.Client{
+			confspace.CreateJSONCredentials(csProto.GetKekCredentials()[0], tokenFile): createFakeKMSClient(0),
+			confspace.CreateJSONCredentials(csProto.GetKekCredentials()[1], tokenFile): createFakeKMSClient(1),
+			"": createFakeKMSClient(2),
+		},
+	}
+
+	var kekInfos []*configpb.KekInfo
+	var shares [][]byte
+	for i := 0; i < len(keks); i++ {
+		shares = append(shares, keks[i].plaintext)
+		kekInfos = append(kekInfos, &configpb.KekInfo{
+			KekType: &configpb.KekInfo_KekUri{KekUri: keks[i].kekURI},
+		})
+	}
+
+	client := &StetClient{testKMSClients: &kmsClients}
+
+	opts := sharesOpts{
+		kekInfos:        kekInfos,
+		asymmetricKeys:  &configpb.AsymmetricKeys{},
+		confSpaceConfig: confspace.NewConfigWithTokenFile(csProto, tokenFile),
+	}
+	wrappedShares, keyURIs, err := client.wrapShares(ctx, shares, opts)
+	if err != nil {
+		t.Fatalf("wrapShares returned with error %v", err)
+	}
+	if len(keyURIs) != len(shares) {
+		t.Fatalf("wrapShares did not return the expected number of keyURIs. Got %v, want %v", len(keyURIs), len(shares))
+	}
+
+	for i := 0; i < len(keks); i++ {
+		i := i
+		expectedShare := append(shares[i], keks[i].expectedSuffix...)
+		if !bytes.Equal(wrappedShares[i].GetShare(), expectedShare) {
+			t.Errorf("wrapShares did not return the expected wrapped share for share %v. Got %s, want %s", i, wrappedShares[i].GetShare(), expectedShare)
 		}
 	}
 }
@@ -756,7 +860,8 @@ func TestWrapSharesError(t *testing.T) {
 				},
 				fakeSecureSessionClient: testCase.fakeSSClient,
 			}
-			_, _, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
+			opts := sharesOpts{kekInfos: testCase.kekInfos, asymmetricKeys: &configpb.AsymmetricKeys{}}
+			_, _, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, opts)
 
 			if err == nil {
 				t.Errorf("wrapShares(%s, %s) expected to return error, but did not", testCase.unwrappedShares, testCase.kekInfos)
@@ -817,13 +922,13 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			unwrappedShares, err := stetClient.unwrapAndValidateShares(ctx, testCase.wrappedShare, [](*configpb.KekInfo){
-				&configpb.KekInfo{
-					KekType: &configpb.KekInfo_KekUri{
-						KekUri: testCase.uri,
-					},
+			opts := sharesOpts{
+				kekInfos: []*configpb.KekInfo{
+					&configpb.KekInfo{KekType: &configpb.KekInfo_KekUri{KekUri: testCase.uri}},
 				},
-			}, &configpb.AsymmetricKeys{})
+				asymmetricKeys: &configpb.AsymmetricKeys{},
+			}
+			unwrappedShares, err := stetClient.unwrapAndValidateShares(ctx, testCase.wrappedShare, opts)
 
 			if err != nil {
 				t.Fatalf("unwrapAndValidateShares returned with error: %v", err)
@@ -837,6 +942,102 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 				t.Errorf("unwrapAndValidateShares did not return the expected unwrapped share. Got %v, want %v", unwrappedShares[0], testCase.wrappedShare)
 			}
 		})
+	}
+}
+
+func TestUnwrapAndValidateSharesWithConfidentialSpace(t *testing.T) {
+	ctx := context.Background()
+	tokenFile := testutil.CreateTempTokenFile(t)
+
+	// Define three test KEKs, each of which should map to a different KMS client.
+	keks := []struct {
+		kekURI         string
+		ciphertext     []byte
+		expectedSuffix []byte
+	}{
+		{"gcp-kms://test-kek-0", []byte("Share 0"), []byte("-with-credentials")},
+		{"gcp-kms://test-kek-1", []byte("Share 1"), []byte("-wip-only-credentials")},
+		{"gcp-kms://test-kek-2", []byte("Share 2"), []byte("-no-credentials")},
+	}
+
+	// Define credentials for only the KEKs that require them.
+	csProto := &configpb.ConfidentialSpaceConfigs{
+		KekCredentials: []*configpb.KekCredentialConfig{
+			{
+				// A set of credentials.
+				KekUriPattern:  keks[0].kekURI,
+				WipName:        "test WIP name",
+				ServiceAccount: "test@system.gserviceaccount.com",
+			},
+			{
+				// Same credentials, but without service account.
+				KekUriPattern: keks[1].kekURI,
+				WipName:       "test WIP name",
+			},
+		},
+	}
+
+	createFakeKMSClient := func(index int) *testutil.FakeKeyManagementClient {
+		return &testutil.FakeKeyManagementClient{
+			GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
+				return &kmsrpb.CryptoKey{
+					Primary: &kmsrpb.CryptoKeyVersion{
+						Name:            req.GetName(),
+						State:           kmsrpb.CryptoKeyVersion_ENABLED,
+						ProtectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
+					},
+				}, nil
+			},
+			DecryptFunc: func(ctx context.Context, req *kmsspb.DecryptRequest, opts ...gax.CallOption) (*kmsspb.DecryptResponse, error) {
+				unwrappedShare := append(req.GetCiphertext(), keks[index].expectedSuffix...)
+
+				return &kmsspb.DecryptResponse{
+					Plaintext:       unwrappedShare,
+					PlaintextCrc32C: wrapperspb.Int64(int64(testutil.CRC32C(unwrappedShare))),
+				}, nil
+			},
+		}
+	}
+
+	// Define a fake Client for each KEK credentials (including no credentials).
+	kmsClients := cloudkms.ClientFactory{
+		CredsMap: map[string]cloudkms.Client{
+			confspace.CreateJSONCredentials(csProto.GetKekCredentials()[0], tokenFile): createFakeKMSClient(0),
+			confspace.CreateJSONCredentials(csProto.GetKekCredentials()[1], tokenFile): createFakeKMSClient(1),
+			"": createFakeKMSClient(2),
+		},
+	}
+
+	var kekInfos []*configpb.KekInfo
+	var wrapped []*configpb.WrappedShare
+	for i := 0; i < len(keks); i++ {
+		wrapped = append(wrapped, &configpb.WrappedShare{
+			Share: keks[i].ciphertext,
+			Hash:  shares.HashShare(append(keks[i].ciphertext, keks[i].expectedSuffix...)),
+		})
+		kekInfos = append(kekInfos, &configpb.KekInfo{
+			KekType: &configpb.KekInfo_KekUri{KekUri: keks[i].kekURI},
+		})
+	}
+
+	client := &StetClient{testKMSClients: &kmsClients}
+
+	opts := sharesOpts{
+		kekInfos:        kekInfos,
+		asymmetricKeys:  &configpb.AsymmetricKeys{},
+		confSpaceConfig: confspace.NewConfigWithTokenFile(csProto, tokenFile),
+	}
+	unwrappedShares, err := client.unwrapAndValidateShares(ctx, wrapped, opts)
+	if err != nil {
+		t.Fatalf("wrapShares returned with error %v", err)
+	}
+
+	for i := 0; i < len(keks); i++ {
+		i := i
+		expectedShare := append(wrapped[i].GetShare(), keks[i].expectedSuffix...)
+		if !bytes.Equal(unwrappedShares[i].Share, expectedShare) {
+			t.Errorf("wrapShares did not return the expected wrapped share for share %v. Got %s, want %s", i, unwrappedShares[i].Share, expectedShare)
+		}
 	}
 }
 
@@ -881,7 +1082,8 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
-	unwrapped, err := stetClient.unwrapAndValidateShares(ctx, wrappedSharesList, kekInfoList, &configpb.AsymmetricKeys{})
+	opts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
+	unwrapped, err := stetClient.unwrapAndValidateShares(ctx, wrappedSharesList, opts)
 
 	if err != nil {
 		t.Fatalf("wrapShares returned with error %v", err)
@@ -983,7 +1185,9 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 				},
 				fakeSecureSessionClient: testCase.fakeSSClient,
 			}
-			shares, err := stetClient.unwrapAndValidateShares(ctx, testCase.wrappedShares, testCase.kekInfos, &configpb.AsymmetricKeys{})
+
+			opts := sharesOpts{kekInfos: testCase.kekInfos, asymmetricKeys: &configpb.AsymmetricKeys{}}
+			shares, err := stetClient.unwrapAndValidateShares(ctx, testCase.wrappedShares, opts)
 
 			if testCase.expectedErrSubstr != "" && err == nil {
 				t.Errorf("unwrapAndValidateShares(context.Background(), %s, %s) expected to return error, but did not", testCase.wrappedShares, testCase.kekInfos)
@@ -1020,12 +1224,13 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 		fakeSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
-	wrapped, _, err := stetClient.wrapShares(ctx, sharesList, kekInfoList, &configpb.AsymmetricKeys{})
+	opts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
+	wrapped, _, err := stetClient.wrapShares(ctx, sharesList, opts)
 	if err != nil {
 		t.Fatalf("wrapShares(context.Background(), %v, %v, {}) returned with error %v", sharesList, kekInfoList, err)
 	}
 
-	unwrapped, err := stetClient.unwrapAndValidateShares(ctx, wrapped, kekInfoList, &configpb.AsymmetricKeys{})
+	unwrapped, err := stetClient.unwrapAndValidateShares(ctx, wrapped, opts)
 	if err != nil {
 		t.Errorf("unwrapAndValidateShares(context.Background(), %v, %v, {}) returned with error %v", wrapped, kekInfoList, err)
 	}
@@ -1053,12 +1258,10 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 		KeySplittingAlgorithm: &configpb.KeyConfig_NoSplit{true},
 	}
 
-	encryptConfig := &configpb.EncryptConfig{
-		KeyConfig: keyConfig,
-	}
-
-	decryptConfig := &configpb.DecryptConfig{
-		KeyConfigs: []*configpb.KeyConfig{keyConfig},
+	stetConfig := &configpb.StetConfig{
+		EncryptConfig:  &configpb.EncryptConfig{KeyConfig: keyConfig},
+		DecryptConfig:  &configpb.DecryptConfig{KeyConfigs: []*configpb.KeyConfig{keyConfig}},
+		AsymmetricKeys: &configpb.AsymmetricKeys{},
 	}
 
 	testCases := []struct {
@@ -1088,30 +1291,30 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 			plaintextBuf := bytes.NewReader(tc.plaintext)
 
 			var ciphertextBuf bytes.Buffer
-			if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err != nil {
-				t.Errorf("Encrypt(ctx, %v, buf, %v, {}, %v) returned error \"%v\", want no error", tc.plaintext, encryptConfig, testBlobID, err)
+			if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, stetConfig, testBlobID); err != nil {
+				t.Errorf("Encrypt(ctx, %v, buf, %v, {}, %v) returned error \"%v\", want no error", tc.plaintext, stetConfig.GetEncryptConfig(), testBlobID, err)
 			}
 
 			// Decrypt the returned data and verify fields.
 			var output bytes.Buffer
-			decryptedMd, err := stetClient.Decrypt(ctx, &ciphertextBuf, &output, decryptConfig, &configpb.AsymmetricKeys{})
+			decryptedMd, err := stetClient.Decrypt(ctx, &ciphertextBuf, &output, stetConfig)
 			if err != nil {
-				t.Fatalf("Error calling client.Decrypt(ctx, buf, buf, %v, {}): %v", decryptConfig, err)
+				t.Fatalf("Error calling client.Decrypt(ctx, buf, buf, %v, {}): %v", stetConfig.GetDecryptConfig(), err)
 			}
 
 			if decryptedMd.BlobID != testBlobID {
-				t.Errorf("Decrypt(ctx, input, output, %v, {}) does not contain the expected blob ID. Got %v, want %v", decryptConfig, decryptedMd.BlobID, testBlobID)
+				t.Errorf("Decrypt(ctx, input, output, %v, {}) does not contain the expected blob ID. Got %v, want %v", stetConfig.GetDecryptConfig(), decryptedMd.BlobID, testBlobID)
 			}
 
 			if len(decryptedMd.KeyUris) != len(keyConfig.GetKekInfos()) {
-				t.Fatalf("Decrypt(ctx, input, output, %v, {}) does not have the expected number of key URIS. Got %v, want %v", decryptConfig, len(decryptedMd.KeyUris), len(keyConfig.GetKekInfos()))
+				t.Fatalf("Decrypt(ctx, input, output, %v, {}) does not have the expected number of key URIS. Got %v, want %v", stetConfig.GetDecryptConfig(), len(decryptedMd.KeyUris), len(keyConfig.GetKekInfos()))
 			}
 			if decryptedMd.KeyUris[0] != kekInfo.GetKekUri() {
-				t.Errorf("Decrypt(ctx, input, output, %v, {}) does not contain the expected key URI. Got { %v }, want { %v }", decryptConfig, decryptedMd.KeyUris[0], kekInfo.GetKekUri())
+				t.Errorf("Decrypt(ctx, input, output, %v, {}) does not contain the expected key URI. Got { %v }, want { %v }", stetConfig.GetDecryptConfig(), decryptedMd.KeyUris[0], kekInfo.GetKekUri())
 			}
 
 			if !bytes.Equal(output.Bytes(), tc.plaintext) {
-				t.Errorf("Decrypt(ctx, input, output, %v, {}) returned ciphertext that does not match original plaintext. Got %v, want %v.", decryptConfig, output.Bytes(), tc.plaintext)
+				t.Errorf("Decrypt(ctx, input, output, %v, {}) returned ciphertext that does not match original plaintext. Got %v, want %v.", stetConfig.GetDecryptConfig(), output.Bytes(), tc.plaintext)
 			}
 		})
 	}
@@ -1129,8 +1332,9 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 		KeySplittingAlgorithm: &configpb.KeyConfig_NoSplit{true},
 	}
 
-	encryptConfig := configpb.EncryptConfig{
-		KeyConfig: &keyConfig,
+	stetConfig := &configpb.StetConfig{
+		EncryptConfig:  &configpb.EncryptConfig{KeyConfig: &keyConfig},
+		AsymmetricKeys: &configpb.AsymmetricKeys{},
 	}
 	plaintext := []byte("This is data to be encrypted.")
 
@@ -1144,7 +1348,7 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 
 	plaintextBuf := bytes.NewReader(plaintext)
 	var ciphertextBuf bytes.Buffer
-	if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err == nil {
+	if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, stetConfig, testBlobID); err == nil {
 		t.Errorf("Encrypt with no split option and more than one KekInfo in the KeyConfig should return an error")
 	}
 }
@@ -1166,12 +1370,12 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 		KeySplittingAlgorithm: &configpb.KeyConfig_Shamir{shamirConfig},
 	}
 
-	encryptConfig := &configpb.EncryptConfig{
-		KeyConfig: keyConfig,
-	}
-
-	decryptConfig := &configpb.DecryptConfig{
-		KeyConfigs: []*configpb.KeyConfig{keyConfig},
+	stetConfig := &configpb.StetConfig{
+		EncryptConfig: &configpb.EncryptConfig{KeyConfig: keyConfig},
+		DecryptConfig: &configpb.DecryptConfig{
+			KeyConfigs: []*configpb.KeyConfig{keyConfig},
+		},
+		AsymmetricKeys: &configpb.AsymmetricKeys{},
 	}
 
 	testCases := []struct {
@@ -1206,13 +1410,13 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			plaintextBuf := bytes.NewReader(tc.plaintext)
 			var ciphertextBuf bytes.Buffer
-			if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err != nil {
+			if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, stetConfig, testBlobID); err != nil {
 				t.Fatalf("Encrypt did not complete successfully: %v", err)
 			}
 
 			// Decrypt the returned data and verify fields.
 			var output bytes.Buffer
-			decryptedMd, err := stetClient.Decrypt(ctx, &ciphertextBuf, &output, decryptConfig, &configpb.AsymmetricKeys{})
+			decryptedMd, err := stetClient.Decrypt(ctx, &ciphertextBuf, &output, stetConfig)
 			if err != nil {
 				t.Fatalf("Error decrypting data: %v", err)
 			}
@@ -1250,8 +1454,10 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 		KeySplittingAlgorithm: &configpb.KeyConfig_Shamir{&shamirConfig},
 	}
 
-	encryptConfig := configpb.EncryptConfig{
-		KeyConfig: &keyConfig,
+	stetConfig := &configpb.StetConfig{
+		EncryptConfig: &configpb.EncryptConfig{
+			KeyConfig: &keyConfig,
+		},
 	}
 	plaintext := []byte("This is data to be encrypted.")
 
@@ -1271,7 +1477,7 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 
 	plaintextBuf := bytes.NewReader(plaintext)
 	var ciphertextBuf bytes.Buffer
-	if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, testBlobID); err == nil {
+	if _, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, stetConfig, testBlobID); err == nil {
 		t.Errorf("Encrypt expected to fail due to invalid Shamir's Secret Sharing configuration.")
 	}
 }
@@ -1290,12 +1496,13 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 		KeySplittingAlgorithm: &configpb.KeyConfig_Shamir{&shamirConfig},
 	}
 
-	encryptConfig := configpb.EncryptConfig{
-		KeyConfig: &keyConfig,
-	}
-
-	decryptConfig := &configpb.DecryptConfig{
-		KeyConfigs: []*configpb.KeyConfig{&keyConfig},
+	stetConfig := &configpb.StetConfig{
+		EncryptConfig: &configpb.EncryptConfig{
+			KeyConfig: &keyConfig,
+		},
+		DecryptConfig: &configpb.DecryptConfig{
+			KeyConfigs: []*configpb.KeyConfig{&keyConfig},
+		},
 	}
 
 	plaintext := []byte("This is data to be encrypted.")
@@ -1319,14 +1526,14 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 		plaintextBuf := bytes.NewReader(plaintext)
 
 		var ciphertextBuf bytes.Buffer
-		encryptedMd, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, &encryptConfig, &configpb.AsymmetricKeys{}, "")
+		encryptedMd, err := stetClient.Encrypt(ctx, plaintextBuf, &ciphertextBuf, stetConfig, "")
 		if err != nil {
 			t.Fatalf("Encrypt expected to succeed, but failed with: %v", err.Error())
 		}
 
 		// Decrypt to ensure the data can still be decrypted based on the blob ID in the metadata.
 		var output bytes.Buffer
-		decryptedMd, err := stetClient.Decrypt(ctx, &ciphertextBuf, &output, decryptConfig, &configpb.AsymmetricKeys{})
+		decryptedMd, err := stetClient.Decrypt(ctx, &ciphertextBuf, &output, stetConfig)
 		if err != nil {
 			t.Fatalf("Error decrypting data: %v", err)
 		}
@@ -1348,7 +1555,9 @@ func TestEncryptFailsWithNilConfig(t *testing.T) {
 
 	plaintextBuf := bytes.NewReader([]byte("This is data to be encrypted."))
 	var ciphertextBuf bytes.Buffer
-	if _, err := stetClient.Encrypt(context.Background(), plaintextBuf, &ciphertextBuf, nil, &configpb.AsymmetricKeys{}, ""); err == nil {
+
+	stetConfig := &configpb.StetConfig{EncryptConfig: nil}
+	if _, err := stetClient.Encrypt(context.Background(), plaintextBuf, &ciphertextBuf, stetConfig, ""); err == nil {
 		t.Errorf("Encrypt expected to fail due to nil EncryptConfig.")
 	}
 }
@@ -1487,8 +1696,13 @@ func TestDecryptErrors(t *testing.T) {
 			}
 			input.Write(ciphertext)
 
+			stetConfig := &configpb.StetConfig{
+				DecryptConfig:  tc.config,
+				AsymmetricKeys: &configpb.AsymmetricKeys{},
+			}
+
 			var output bytes.Buffer
-			if _, err := stetClient.Decrypt(ctx, &input, &output, tc.config, &configpb.AsymmetricKeys{}); err == nil {
+			if _, err := stetClient.Decrypt(ctx, &input, &output, stetConfig); err == nil {
 				t.Errorf("Got no error, want error related to %q.", tc.errSubstr)
 			}
 		})
