@@ -1,0 +1,20 @@
+encrypt_config:
+  key_config:
+    kek_infos:
+    - kek_uri: "gcp-kms://projects/my-project/locations/us-east1/keyRings/my-key-ring/cryptoKeys/confspace-key"
+    dek_algorithm: AES256_GCM
+    no_split: true
+
+decrypt_config:
+  key_configs:
+  - kek_infos:  # Note the extra hyphen here, because key_configs is a repeated field.
+    - kek_uri: "gcp-kms://projects/my-project/locations/us-east1/keyRings/my-key-ring/cryptoKeys/confspace-key"
+    dek_algorithm: AES256_GCM
+    no_split: true
+
+confidential_space_configs:
+  kek_credentials:
+    - kek_uri_pattern: "gcp-kms://projects/my-project/locations/us-east1/keyRings/my-key-ring/cryptoKeys/confspace-key"
+      wip_name: "projects/123456789/locations/global/workloadIdentityPools/trusted-workload-pool/providers/attestation-verifier"
+      service_account: "trusteddecrypter@my-project.iam.gserviceaccount.com"
+      mode: DECRYPT_ONLY_MODE
