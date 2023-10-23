@@ -27,9 +27,11 @@ import (
 	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/client/shares"
 	"github.com/GoogleCloudPlatform/stet/client/testutil"
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/tink/go/subtle/random"
 	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/testing/protocmp"
 
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	kmsrpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
@@ -260,7 +262,7 @@ func TestEkmSecureSessionWrap(t *testing.T) {
 	md := kekMetadata{uri: testutil.TestExternalCloudKEKURI}
 	expectedCiphertext := append(plaintext, byte('E'))
 
-	stetClient := &StetClient{fakeSecureSessionClient: &fakeSecureSessionClient{}}
+	stetClient := &StetClient{testSecureSessionClient: &fakeSecureSessionClient{}}
 
 	ciphertext, err := stetClient.ekmSecureSessionWrap(ctx, plaintext, md)
 	if err != nil {
@@ -298,7 +300,7 @@ func TestEkmSecureSessionWrapError(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		stetClient := &StetClient{fakeSecureSessionClient: testCase.fakeEkmClient}
+		stetClient := &StetClient{testSecureSessionClient: testCase.fakeEkmClient}
 
 		_, err := stetClient.ekmSecureSessionWrap(ctx, []byte("this is plaintext"), kekMetadata{uri: "this is a uri"})
 		if err == nil {
@@ -313,7 +315,7 @@ func TestEkmSecureSessionUnwrap(t *testing.T) {
 	md := kekMetadata{uri: testutil.TestExternalCloudKEKURI}
 	ciphertext := append(expectedPlaintext, byte('E'))
 
-	stetClient := &StetClient{fakeSecureSessionClient: &fakeSecureSessionClient{}}
+	stetClient := &StetClient{testSecureSessionClient: &fakeSecureSessionClient{}}
 
 	plaintext, err := stetClient.ekmSecureSessionUnwrap(ctx, ciphertext, md)
 	if err != nil {
@@ -351,7 +353,7 @@ func TestEkmSecureSessionUnwrapError(t *testing.T) {
 	}
 
 	for _, testCase := range testCases {
-		stetClient := &StetClient{fakeSecureSessionClient: testCase.fakeEkmClient}
+		stetClient := &StetClient{testSecureSessionClient: testCase.fakeEkmClient}
 
 		_, err := stetClient.ekmSecureSessionUnwrap(ctx, []byte("this is ciphertext"), kekMetadata{uri: testutil.TestExternalCloudKEKURI})
 		if err == nil {
@@ -398,7 +400,7 @@ func TestWrapSharesIndividually(t *testing.T) {
 				testKMSClients: &cloudkms.ClientFactory{
 					CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 				},
-				fakeSecureSessionClient: &fakeSecureSessionClient{},
+				testSecureSessionClient: &fakeSecureSessionClient{},
 			}
 
 			ki := []*configpb.KekInfo{
@@ -617,7 +619,7 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		fakeSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
 	wrapOpts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
@@ -858,7 +860,7 @@ func TestWrapSharesError(t *testing.T) {
 				testKMSClients: &cloudkms.ClientFactory{
 					CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
 				},
-				fakeSecureSessionClient: testCase.fakeSSClient,
+				testSecureSessionClient: testCase.fakeSSClient,
 			}
 			opts := sharesOpts{kekInfos: testCase.kekInfos, asymmetricKeys: &configpb.AsymmetricKeys{}}
 			_, _, err := stetClient.wrapShares(ctx, testCase.unwrappedShares, opts)
@@ -917,7 +919,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		fakeSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
 	for _, testCase := range testCases {
@@ -1079,7 +1081,7 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
 
-		fakeSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
 	opts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
@@ -1183,7 +1185,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 				testKMSClients: &cloudkms.ClientFactory{
 					CredsMap: map[string]cloudkms.Client{"": fakeKmsClient},
 				},
-				fakeSecureSessionClient: testCase.fakeSSClient,
+				testSecureSessionClient: testCase.fakeSSClient,
 			}
 
 			opts := sharesOpts{kekInfos: testCase.kekInfos, asymmetricKeys: &configpb.AsymmetricKeys{}}
@@ -1221,7 +1223,7 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		fakeSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
 	opts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
@@ -1283,7 +1285,7 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		fakeSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
 	for _, tc := range testCases {
@@ -1343,7 +1345,7 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		fakeSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
 	plaintextBuf := bytes.NewReader(plaintext)
@@ -1403,7 +1405,7 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
 		},
-		fakeSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
 	for _, tc := range testCases {
@@ -1472,7 +1474,7 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
 		},
-		fakeSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
 	plaintextBuf := bytes.NewReader(plaintext)
@@ -1517,7 +1519,7 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
 		},
-		fakeSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &fakeSecureSessionClient{},
 	}
 
 	blobIDs := []string{}
@@ -1704,6 +1706,68 @@ func TestDecryptErrors(t *testing.T) {
 			var output bytes.Buffer
 			if _, err := stetClient.Decrypt(ctx, &input, &output, stetConfig); err == nil {
 				t.Errorf("Got no error, want error related to %q.", tc.errSubstr)
+			}
+		})
+	}
+}
+
+func TestNewConfspaceConfig(t *testing.T) {
+	tokenFile := testutil.CreateTempTokenFile(t)
+	testStetCfg := &configpb.StetConfig{
+		ConfidentialSpaceConfigs: &configpb.ConfidentialSpaceConfigs{
+			KekCredentials: []*configpb.KekCredentialConfig{&configpb.KekCredentialConfig{
+				KekUriPattern:  "test/kek",
+				WipName:        "test-wip",
+				ServiceAccount: "testsa@google.com",
+			}},
+		},
+	}
+	testCSCfg := confspace.NewConfigWithTokenFile(testStetCfg.GetConfidentialSpaceConfigs(), tokenFile)
+
+	realStetCfg := &configpb.StetConfig{
+		ConfidentialSpaceConfigs: &configpb.ConfidentialSpaceConfigs{
+			KekCredentials: []*configpb.KekCredentialConfig{&configpb.KekCredentialConfig{
+				KekUriPattern:  "real/kek",
+				WipName:        "real-wip",
+				ServiceAccount: "realsa@google.com",
+			}},
+		},
+	}
+
+	testcases := []struct {
+		name        string
+		protoConfig *configpb.StetConfig
+		testConfig  *confspace.Config
+		expected    *confspace.Config
+	}{
+		{
+			name:        "test config",
+			protoConfig: realStetCfg,
+			testConfig:  testCSCfg,
+			expected:    testCSCfg,
+		},
+		{
+			name:        "proto config",
+			protoConfig: realStetCfg,
+			expected:    confspace.NewConfig(realStetCfg.GetConfidentialSpaceConfigs()),
+		},
+		{
+			name:        "no config",
+			protoConfig: nil,
+			expected:    nil,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := &StetClient{
+				testConfspaceConfig: tc.testConfig,
+			}
+
+			clientConfig := client.newConfSpaceConfig(tc.protoConfig)
+
+			if diff := cmp.Diff(tc.expected, clientConfig, cmp.AllowUnexported(confspace.Config{}), protocmp.Transform()); diff != "" {
+				t.Errorf("NewConfspaceConfig(%v) returned diff (-want +got):\n%s", tc.protoConfig, diff)
 			}
 		})
 	}

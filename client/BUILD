@@ -47,6 +47,7 @@ go_test(
     name = "client_test",
     size = "small",
     srcs = [
+        "client_confspace_test.go",
         "client_keys_test.go",
         "client_test.go",
         "clientutil_test.go",
@@ -59,10 +60,12 @@ go_test(
         "//client/shares",
         "//client/testutil",
         "//proto:config_go_proto",
+        "@com_github_google_go_cmp//cmp:go_default_library",
         "@com_github_google_tink_go//subtle/random:go_default_library",
         "@com_github_googleapis_gax_go_v2//:go_default_library",
         "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
         "@org_golang_google_protobuf//proto",
+        "@org_golang_google_protobuf//testing/protocmp:go_default_library",
         "@org_golang_google_protobuf//types/known/wrapperspb",
     ],
 )

@@ -59,10 +59,11 @@ type secureSessionClient interface {
 // StetClient provides Encryption and Decryption services through the Split Trust Encryption Tool.
 type StetClient struct {
 	// Contains test KMS clients.
-	testKMSClients *cloudkms.ClientFactory
+	testKMSClients      *cloudkms.ClientFactory
+	testConfspaceConfig *confidentialspace.Config
 
 	// Fake Secure Session Client for testing purposes.
-	fakeSecureSessionClient secureSessionClient
+	testSecureSessionClient secureSessionClient
 
 	// Whether to skip verification of the inner TLS session cert.
 	InsecureSkipVerify bool
@@ -92,8 +93,8 @@ func (c *StetClient) ekmSecureSessionWrap(ctx context.Context, unwrappedShare []
 	}
 
 	var ekmClient secureSessionClient
-	if c.fakeSecureSessionClient != nil {
-		ekmClient = c.fakeSecureSessionClient
+	if c.testSecureSessionClient != nil {
+		ekmClient = c.testSecureSessionClient
 	} else {
 		authToken, err := jwt.GenerateTokenWithAudience(ctx, addr)
 		if err != nil {
@@ -126,8 +127,8 @@ func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []
 	}
 
 	var ekmClient secureSessionClient
-	if c.fakeSecureSessionClient != nil {
-		ekmClient = c.fakeSecureSessionClient
+	if c.testSecureSessionClient != nil {
+		ekmClient = c.testSecureSessionClient
 	} else {
 		authToken, err := jwt.GenerateTokenWithAudience(ctx, addr)
 		if err != nil {
@@ -403,6 +404,18 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 	return unwrappedShares, nil
 }
 
+func (c *StetClient) newConfSpaceConfig(stetConfig *configpb.StetConfig) *confidentialspace.Config {
+	if c.testConfspaceConfig != nil {
+		return c.testConfspaceConfig
+	}
+
+	if csConfigs := stetConfig.GetConfidentialSpaceConfigs(); csConfigs != nil {
+		return confidentialspace.NewConfig(csConfigs)
+	}
+
+	return nil
+}
+
 // Encrypt generates a DEK and creates EncryptedData in accordance with the EKM encryption protocol.
 func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Writer, stetConfig *configpb.StetConfig, blobID string) (*StetMetadata, error) {
 	config := stetConfig.GetEncryptConfig()
@@ -427,11 +440,9 @@ func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Wri
 
 	var keyURIs []string
 	opts := sharesOpts{
-		kekInfos:       keyCfg.GetKekInfos(),
-		asymmetricKeys: stetConfig.GetAsymmetricKeys(),
-	}
-	if csConfigs := stetConfig.GetConfidentialSpaceConfigs(); csConfigs != nil {
-		opts.confSpaceConfig = confidentialspace.NewConfig(csConfigs)
+		kekInfos:        keyCfg.GetKekInfos(),
+		asymmetricKeys:  stetConfig.GetAsymmetricKeys(),
+		confSpaceConfig: c.newConfSpaceConfig(stetConfig),
 	}
 
 	metadata.Shares, keyURIs, err = c.wrapShares(ctx, shares, opts)
@@ -501,11 +512,9 @@ func (c *StetClient) Decrypt(ctx context.Context, input io.Reader, output io.Wri
 
 	// Unwrap shares and validate.
 	opts := sharesOpts{
-		kekInfos:       matchingKeyConfig.GetKekInfos(),
-		asymmetricKeys: stetConfig.GetAsymmetricKeys(),
-	}
-	if csConfigs := stetConfig.GetConfidentialSpaceConfigs(); csConfigs != nil {
-		opts.confSpaceConfig = confidentialspace.NewConfig(csConfigs)
+		kekInfos:        matchingKeyConfig.GetKekInfos(),
+		asymmetricKeys:  stetConfig.GetAsymmetricKeys(),
+		confSpaceConfig: c.newConfSpaceConfig(stetConfig),
 	}
 
 	unwrappedShares, err := c.unwrapAndValidateShares(ctx, metadata.GetShares(), opts)

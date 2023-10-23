@@ -52,13 +52,18 @@ var (
 	TestSoftwareKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/testSoftware"
 	// TestSoftwareKEKURI is a test KEK URI corresponding to TestSoftwareKEKName.
 	TestSoftwareKEKURI = gcpKMSPrefix + TestSoftwareKEKName
+
+	// TestConfSpaceKEKName is a test key name for a Confidential Space key.
+	TestConfSpaceKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/testConfSpace"
+	// TestConfSpaceKEKURI is a test key name for a Confidential Space key.
+	TestConfSpaceKEKURI = gcpKMSPrefix + TestConfSpaceKEKName
 )
 
 // CreateTempTokenFile creates a temp directory/file as a stand-in for the attestation token.
 func CreateTempTokenFile(t *testing.T) string {
 	// Create token file.
 	tempDir := t.TempDir()
-	tokenFile := tempDir + "test_token"
+	tokenFile := tempDir + "/test_token"
 	if err := os.WriteFile(tokenFile, []byte("test token"), 0755); err != nil {
 		t.Fatalf("Error creating token file at %v: %v", tokenFile, err)
 	}
