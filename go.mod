@@ -8,7 +8,7 @@ require (
 	cloud.google.com/go/kms v1.10.2
 	github.com/alecthomas/colour v0.1.0
 	github.com/golang/glog v1.1.0
-	github.com/golang/protobuf v1.5.3
+	github.com/google/go-cmp v0.5.9
 	github.com/google/go-tpm v0.3.3
 	github.com/google/go-tpm-tools v0.3.3
 	github.com/google/subcommands v1.2.0
@@ -19,7 +19,7 @@ require (
 	golang.org/x/oauth2 v0.8.0
 	google.golang.org/api v0.124.0
 	google.golang.org/genproto v0.0.0-20230525154841-bd750badd5c6
-	google.golang.org/grpc v1.55.0
+	google.golang.org/grpc v1.56.3
 	google.golang.org/protobuf v1.30.0
 	sigs.k8s.io/yaml v1.3.0
 )
@@ -27,9 +27,9 @@ require (
 require (
 	cloud.google.com/go/compute v1.19.3 // indirect
 	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
+	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/certificate-transparency-go v1.1.2 // indirect
 	github.com/google/go-attestation v0.4.3-0.20220215003148-83d71b1c538e // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
 	github.com/google/go-tspi v0.2.1-0.20190423175329-115dea689aad // indirect
 	github.com/google/s2a-go v0.1.4 // indirect
 	github.com/googleapis/enterprise-certificate-proxy v0.2.3 // indirect
