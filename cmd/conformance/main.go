@@ -26,6 +26,8 @@ import (
 	"strings"
 
 	"cloud.google.com/go/kms/apiv1"
+	rpb "cloud.google.com/go/kms/apiv1/kmspb"
+	spb "cloud.google.com/go/kms/apiv1/kmspb"
 	"flag"
 	"github.com/GoogleCloudPlatform/stet/client/ekmclient"
 	"github.com/GoogleCloudPlatform/stet/client/jwt"
@@ -39,9 +41,7 @@ import (
 	"github.com/alecthomas/colour"
 	glog "github.com/golang/glog"
 	apb "github.com/google/go-tpm-tools/proto/attest"
-	"github.com/google/go-tpm/tpm2"
-	rpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
-	spb "google.golang.org/genproto/googleapis/cloud/kms/v1"
+	"github.com/google/go-tpm/legacy/tpm2"
 	"google.golang.org/protobuf/proto"
 )
 

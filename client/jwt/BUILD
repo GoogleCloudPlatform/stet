@@ -23,9 +23,9 @@ go_library(
     srcs = ["jwt.go"],
     importpath = "github.com/GoogleCloudPlatform/stet/client/jwt",
     deps = [
-        "@com_google_cloud_go//compute/metadata",
-        "@com_google_cloud_go//iam/credentials/apiv1:go_default_library",
-        "@go_googleapis//google/iam/credentials/v1:credentials_go_proto",
+        "@com_google_cloud_go_compute_metadata//:go_default_library",
+        "@com_google_cloud_go_iam//credentials/apiv1",
+        "@com_google_cloud_go_iam//credentials/apiv1/credentialspb:go_default_library",
         "@org_golang_x_oauth2//google:go_default_library",
     ],
 )

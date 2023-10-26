@@ -1,6 +1,6 @@
 --- proto/BUILD.bazel
 +++ proto/BUILD.bazel
-@@ -1,4 +1,18 @@
+@@ -1,4 +1,22 @@
  load("@io_bazel_rules_go//go:def.bzl", "go_library")
 +load("@rules_proto//proto:defs.bzl", "proto_library")
 +
@@ -8,7 +8,11 @@
 +    name = "attest_proto",
 +    srcs = ["attest.proto"],
 +    visibility = ["//visibility:public"],
-+    deps = [":tpm_proto"],
++    deps = [
++      ":tpm_proto",
++      "@com_github_google_go_sev_guest//proto:sevsnp_proto",
++      "@com_github_google_go_tdx_guest//proto:tdx_proto",
++    ],
 +)
 +
 +proto_library(

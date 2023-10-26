@@ -33,9 +33,9 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 
+	kmsrpb "cloud.google.com/go/kms/apiv1/kmspb"
+	kmsspb "cloud.google.com/go/kms/apiv1/kmspb"
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
-	kmsrpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
-	kmsspb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 

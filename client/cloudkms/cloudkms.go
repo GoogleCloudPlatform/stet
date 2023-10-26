@@ -21,10 +21,10 @@ import (
 	"hash/crc32"
 
 	"cloud.google.com/go/kms/apiv1"
+	rpb "cloud.google.com/go/kms/apiv1/kmspb"
+	spb "cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/api/option"
-	rpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
-	spb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 

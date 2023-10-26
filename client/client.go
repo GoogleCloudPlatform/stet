@@ -26,6 +26,8 @@ import (
 	"path"
 	"strings"
 
+	rpb "cloud.google.com/go/kms/apiv1/kmspb"
+	spb "cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/GoogleCloudPlatform/stet/client/cloudkms"
 	"github.com/GoogleCloudPlatform/stet/client/confidentialspace"
 	"github.com/GoogleCloudPlatform/stet/client/jwt"
@@ -34,8 +36,6 @@ import (
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	glog "github.com/golang/glog"
 	"github.com/google/uuid"
-	rpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
-	spb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	"google.golang.org/protobuf/proto"
 )
 

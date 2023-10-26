@@ -21,11 +21,11 @@ import (
 	"testing"
 
 	"cloud.google.com/go/kms/apiv1"
+	kmsspb "cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/GoogleCloudPlatform/stet/client/testutil"
 	"github.com/google/go-cmp/cmp"
 	"github.com/googleapis/gax-go/v2"
 	"google.golang.org/api/option"
-	kmsspb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 

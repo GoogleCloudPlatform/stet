@@ -20,13 +20,13 @@ import (
 	"fmt"
 	"testing"
 
+	rpb "cloud.google.com/go/kms/apiv1/kmspb"
+	spb "cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/GoogleCloudPlatform/stet/client/cloudkms"
 	confspace "github.com/GoogleCloudPlatform/stet/client/confidentialspace"
 	"github.com/GoogleCloudPlatform/stet/client/testutil"
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	"github.com/googleapis/gax-go/v2"
-	rpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
-	spb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 

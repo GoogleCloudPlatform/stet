@@ -22,9 +22,9 @@ import (
 	"testing"
 
 	"cloud.google.com/go/kms/apiv1"
+	kmsrpb "cloud.google.com/go/kms/apiv1/kmspb"
+	kmsspb "cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/googleapis/gax-go/v2"
-	kmsrpb "google.golang.org/genproto/googleapis/cloud/kms/v1"
-	kmsspb "google.golang.org/genproto/googleapis/cloud/kms/v1"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
 

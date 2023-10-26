@@ -30,10 +30,10 @@ go_library(
         "//proto:secure_session_go_proto",
         "//transportshim",
         "@com_github_golang_glog//:glog",
-        "@com_github_google_go_tpm//tpm2:go_default_library",
+        "@com_github_google_go_tpm//legacy/tpm2:go_default_library",
         "@com_github_google_go_tpm_tools//client:go_default_library",
         "@com_github_google_go_tpm_tools//proto/attest:go_default_library",
-        "@com_google_cloud_go//compute/metadata",
+        "@com_google_cloud_go_compute_metadata//:go_default_library",
         "@org_golang_google_protobuf//proto",
     ],
 )

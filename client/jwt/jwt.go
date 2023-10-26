@@ -25,7 +25,7 @@ import (
 	"cloud.google.com/go/iam/credentials/apiv1"
 	"golang.org/x/oauth2/google"
 
-	iamcredspb "google.golang.org/genproto/googleapis/iam/credentials/v1"
+	iamcredspb "cloud.google.com/go/iam/credentials/apiv1/credentialspb"
 )
 
 const (

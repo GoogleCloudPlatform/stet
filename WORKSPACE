@@ -71,9 +71,9 @@ go_library(
     visibility = ["//visibility:public"],
 )
 """,
-    sha256 = "507ad9503c6487d4dd4543fc9974ae306797ec36be75ce1d7c31aa43839bdabf",
-    strip_prefix = "vault-1.14.1",
-    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.14.1.tar.gz"],
+    sha256 = "240d9b6fd17d5c8bc544695cae0a3529f45b5ed0c0ccece3e791ffe5eef7520a",
+    strip_prefix = "vault-1.14.5",
+    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.14.5.tar.gz"],
 )
 
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
@@ -82,111 +82,88 @@ load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
 go_repository(
     name = "org_golang_google_grpc",
     importpath = "google.golang.org/grpc",
-    sum = "h1:uSZWeQJX5j11bIQ4AJoj+McDBo29cY1MCoC1wO3ts+c=",
-    version = "v1.37.0",
+    sum = "h1:Z5Iec2pjwb+LEOqzpB2MR12/eKFhDPhuqW91O+4bwUk=",
+    version = "v1.59.0",
 )
 
 # Cloud KMS client library
 go_repository(
-    name = "com_google_cloud_go",
-    importpath = "cloud.google.com/go",
-    sum = "h1:NLQf5e1OMspfNT1RAHOB3ublr1TW3YTXO8OiWwVjK2U=",
-    version = "v0.61.0",
+    name = "com_google_cloud_go_kms",
+    importpath = "cloud.google.com/go/kms",
+    sum = "h1:RYsbxTRmk91ydKCzekI2YjryO4c5Y2M80Zwcs9/D/cI=",
+    version = "v1.15.3",
+)
+
+# Cloud IAM client library
+go_repository(
+    name = "com_google_cloud_go_iam",
+    importpath = "cloud.google.com/go/iam",
+    sum = "h1:18tKG7DzydKWUnLjonWcJO6wjSCAtzh4GcRKlH/Hrzc=",
+    version = "v1.1.3",
+)
+
+# Cloud Compute client library
+go_repository(
+    name = "com_google_cloud_go_compute_metadata",
+    importpath = "cloud.google.com/go/compute/metadata",
+    sum = "h1:mg4jlk7mCAj6xXp9UJ4fjI9VUI5rubuGBW5aJ7UnBMY=",
+    version = "v0.2.3",
 )
 
 # Needed for com_google_cloud_go.
 go_repository(
     name = "com_github_googleapis_gax_go_v2",
     importpath = "github.com/googleapis/gax-go/v2",
-    sum = "h1:sjZBwGj9Jlw33ImPtvFviGYvseOtDM7hkSKB7+Tv3SM=",
-    version = "v2.0.5",
+    sum = "h1:A+gCJKdRfqXkr+BIRGtZLibNXf0m1f9E4HG56etFpas=",
+    version = "v2.12.0",
 )
 
 # Needed for com_google_cloud_go.
 go_repository(
     name = "org_golang_google_api",
     importpath = "google.golang.org/api",
-    sum = "h1:BaiDisFir8O4IJxvAabCGGkQ6yCJegNQqSVoYUNAnbk=",
-    version = "v0.29.0",
+    sum = "h1:HBq4TZlN4/1pNcu0geJZ/Q50vIwIXT532UIMYoo0vOs=",
+    version = "v0.148.0",
 )
 
 # Needed for com_google_cloud_go.
 go_repository(
     name = "org_golang_x_oauth2",
     importpath = "golang.org/x/oauth2",
-    sum = "h1:TzXSXBo42m9gQenoE3b9BGiEpg5IG2JkU5FkPIawgtw=",
-    version = "v0.0.0-20200107190931-bf48bf16ab8d",
-)
-
-# Needed for com_google_cloud_go.
-go_repository(
-    name = "io_opencensus_go",
-    importpath = "go.opencensus.io",
-    sum = "h1:LYy1Hy3MJdrCdMwwzxA/dRok4ejH+RwNGbuoD9fCjto=",
-    version = "v0.22.4",
-)
-
-# Needed for com_google_cloud_go.
-go_repository(
-    name = "com_github_golang_groupcache",
-    importpath = "github.com/golang/groupcache",
-    sum = "h1:1r7pUrabqp18hOBcwBwiTsbnFeTZHV9eER/QT5JVZxY=",
-    version = "v0.0.0-20200121045136-8c9f03a8e57e",
-)
-
-# Required for Shamir's implementation
-go_repository(
-    name = "com_github_hashicorp_errwrap",
-    importpath = "github.com/hashicorp/errwrap",
-    sum = "h1:OxrOeh75EUXMY8TBjag2fzXGZ40LB6IKw45YeGUDY2I=",
-    version = "v1.1.0",
+    sum = "h1:jDDenyj+WgFtmV3zYVoi8aE2BwtXFLWOA67ZfNWftiY=",
+    version = "v0.13.0",
 )
 
 # Used for crypto APIs
 go_repository(
     name = "com_github_google_tink_go",
     importpath = "github.com/google/tink/go",
-    sum = "h1:iC+PQlQsR8oVxJnrSDS8u9GFXsPy8f56LFmEaGZDhD4=",
-    version = "v1.5.0",
+    sum = "h1:6Eox8zONGebBFcCBqkVmt60LaWZa6xg1cl/DwAh/J1w=",
+    version = "v1.7.0",
 )
 
 # Used for logging
 go_repository(
     name = "com_github_golang_glog",
-    commit = "424d2337a5299a465c8a8228fc3ba4b1c28337a2",
     importpath = "github.com/golang/glog",
-)
-
-# Used for proto encoding.
-go_repository(
-    name = "com_github_tdewolff_minify_v2",
-    importpath = "github.com/tdewolff/minify/v2",
-    sum = "h1:2Pv8pFRX/ZfjTRYX2xzcuNrkEJqU5TfriNJJYOeN3rI=",
-    version = "v2.9.16",
-)
-
-# Needed for tdewolff/minify.
-go_repository(
-    name = "com_github_tdewolff_parse_v2",
-    importpath = "github.com/tdewolff/parse/v2",
-    sum = "h1:ADVB3h2AR2jkLhY1LttDqRj3FFPDgSa0RZUBq5+q/t8=",
-    version = "v2.5.16",
+    sum = "h1:DVjP2PbBOzHyzA+dn3WhHIq4NdVu3Q+pvivFICf/7fo=",
+    version = "v1.1.2",
 )
 
 # Used to stabilize proto encoding.
 go_repository(
     name = "org_golang_google_protobuf",
     importpath = "google.golang.org/protobuf",
-    sum = "h1:Ejskq+SyPohKW+1uil0JJMtmHCgJPJ/qWTxr8qp+R4c=",
-    version = "v1.25.0",
+    sum = "h1:g0LDEJHgrBl9N9r17Ru3sqWhkIx2NB67okBHPwC7hs8=",
+    version = "v1.31.0",
 )
 
 # Used to create connection ID for secure session.
 go_repository(
     name = "com_github_google_uuid",
     importpath = "github.com/google/uuid",
-    sum = "h1:qJYtXnJRWmpe7m/3XlyhrsLrEURqHRM2kxzoxXqyUDs=",
-    version = "v1.2.0",
+    sum = "h1:KjJaJ9iWZ3jOFZIf1Lqf4laDRCasjl0BCmnEGxkdLb4=",
+    version = "v1.3.1",
 )
 
 # Used to build the STET CLI.
@@ -201,8 +178,8 @@ go_repository(
 go_repository(
     name = "com_github_google_go_tpm_tools",
     importpath = "github.com/google/go-tpm-tools",
-    sum = "h1:EkMRDnvDt+hCux/gZTgk+tYmKhp5Crt2AEDjGCyKoXE=",
-    version = "v0.3.3",
+    sum = "h1:gYU6iwRo0tY3V6NDnS6m+XYog+b3g6YFhHQl3sYaUL4=",
+    version = "v0.4.1",
     patches = [
         "patches/go-tpm-tools/BUILD.patch",
         "patches/go-tpm-tools/attest.proto.patch",
@@ -213,31 +190,8 @@ go_repository(
 go_repository(
     name = "com_github_google_go_tpm",
     importpath = "github.com/google/go-tpm",
-    sum = "h1:P/ZFNBZYXRxc+z7i5uyd8VP7MaDteuLZInzrH2idRGo=",
-    version = "v0.3.3",
-)
-
-# Needed for com_github_google_go_tpm_tools.
-go_repository(
-    name = "com_github_google_go_attestation",
-    importpath = "github.com/google/go-attestation",
-    sum = "h1:hHhPfym1TZm88L7sWmdc/moikHt80ls6mEiU+QvhRvk=",
-    version = "v0.4.3",
-)
-
-# Needed for com_github_google_go_attestation.
-go_repository(
-    name = "com_github_google_go_tspi",
-    importpath = "github.com/google/go-tspi",
-    commit = "115dea689aad055993e26f6423bf3cf800e732d7",
-)
-
-# Needed for com_github_google_go_attestation.
-go_repository(
-    name = "com_github_google_certificate_transparency_go",
-    importpath = "github.com/google/certificate-transparency-go",
-    sum = "h1:6JHXZhXEvilMcTjR4MGZn5KV0IRkcFl4CJx5iHVhjFE=",
-    version = "v1.1.1",
+    sum = "h1:sQF6YqWMi+SCXpsmS3fd21oPy/vSddwZry4JnmltHVk=",
+    version = "v0.9.0",
 )
 
 # Used to convert YAML to JSON for config files.
@@ -255,19 +209,174 @@ go_repository(
     version = "v0.1.0"
 )
 
+go_repository(
+    name = "com_github_google_go_cmp",
+    importpath = "github.com/google/go-cmp",
+    sum = "h1:ofyhxvXcZhMsU5ulbFiLKl/XBFqE1GSq7atu8tAmTRI=",
+    version = "v0.6.0",
+)
+
+# Indirect dependencies.
+
+# Needed for com_google_cloud_go.
+go_repository(
+    name = "com_github_golang_groupcache",
+    importpath = "github.com/golang/groupcache",
+    sum = "h1:oI5xCqsCo564l8iNU+DwB5epxmsaqB+rhGL0m5jtYqE=",
+    version = "v0.0.0-20210331224755-41bb18bfe9da",
+)
+
+# Needed for com_google_cloud_go.
+go_repository(
+    name = "io_opencensus_go",
+    importpath = "go.opencensus.io",
+    sum = "h1:y73uSU6J157QMP2kn2r30vwW1A2W2WFwSCGnAVxeaD0=",
+    version = "v0.24.0",
+)
+
+# Needed for go_tpm_tools.
+go_repository(
+  name = "com_github_google_go_sev_guest",
+  importpath = "github.com/google/go-sev-guest",
+  sum = "h1:DBCABhTo7WicP27ZH/hwcCdjcmxFkxxMOQXm5hFcfp4=",
+  version = "v0.7.0",
+  patches = [
+    "patches/go-sev-guest/BUILD.patch",
+  ],
+)
+
+# Needed for go_tpm_tools.
+go_repository(
+  name = "com_github_google_go_tdx_guest",
+  importpath = "github.com/google/go-tdx-guest",
+  sum = "h1:XqVJa7fVU8b+Hlhcvw49qfg0+LYcRI+V+jYUrSek848=",
+  version = "v0.2.1-0.20230907045450-944015509c84",
+  patches = [
+    "patches/go-tdx-guest/BUILD.patch",
+  ],
+)
+
+# Needed for com_github_google_go_tpm_tools.
+go_repository(
+    name = "com_github_google_go_attestation",
+    importpath = "github.com/google/go-attestation",
+    sum = "h1:jXtAWT2sw2Yu8mYU0BC7FDidR+ngxFPSE+pl6IUu3/0=",
+    version = "v0.5.0",
+)
+
+# Needed for com_github_google_go_attestation.
+go_repository(
+    name = "com_github_google_go_tspi",
+    importpath = "github.com/google/go-tspi",
+    sum = "h1:ADtq8RKfP+jrTyIWIZDIYcKOMecRqNJFOew2IT0Inus=",
+    version = "v0.3.0",
+)
+
+# Needed for com_github_google_go_attestation.
+go_repository(
+    name = "com_github_google_certificate_transparency_go",
+    importpath = "github.com/google/certificate-transparency-go",
+    sum = "h1:4hE0GEId6NAW28dFpC+LrRGwQX5dtmXQGDbg8+/MZOM=",
+    version = "v1.1.2",
+)
+
 # Needed for com_github_alecthomas_colour.
 go_repository(
     name = "com_github_mattn_go_isatty",
     importpath = "github.com/mattn/go-isatty",
-    sum = "h1:yVuAays6BHfxijgZPzw+3Zlu5yQgKGP2/hcQbHb7S9Y=",
-    version = "v0.0.14"
+    sum = "h1:JITubQf0MOLdlGRuRq+jtsDlekdYPia9ZFsB8h/APPA=",
+    version = "v0.0.19"
 )
 
 go_repository(
-    name = "com_github_google_go_cmp",
-    importpath = "github.com/google/go-cmp",
-    sum = "h1:e6P7q2lk1O+qJJb4BtCQXlK8vWEO8V1ZeuEdJNOqZyg=",
-    version = "v0.5.8",
+    name = "com_github_pkg_errors",
+    importpath = "github.com/pkg/errors",
+    sum = "h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=",
+    version = "v0.9.1"
+)
+
+go_repository(
+    name = "com_github_pborman_uuid",
+    importpath = "github.com/pborman/uuid",
+    sum = "h1:J7Q5mO4ysT1dv8hyrUGHb9+ooztCXu1D8MY8DZYsu3g=",
+    version = "v1.2.0"
+)
+
+go_repository(
+  name = "com_github_google_logger",
+  importpath = "github.com/google/logger",
+  sum = "h1:+6Z2geNxc9G+4D4oDO9njjjn2d0wN5d7uOo0vOIW1NQ=",
+  version = "v1.1.1",
+)
+
+go_repository(
+  name = "com_github_google_s2a_go",
+  importpath = "github.com/google/s2a-go",
+  sum = "h1:60BLSyTrOV4/haCDW4zb1guZItoSq8foHCXrAnjBo/o=",
+  version = "v0.1.7",
+)
+
+go_repository(
+  name = "com_github_googleapis_enterprise_certificate_proxy",
+  importpath = "github.com/googleapis/enterprise-certificate-proxy",
+  sum = "h1:SBWmZhjUDRorQxrN0nwzf+AHBxnbFjViHQS4P0yVpmQ=",
+  version = "v0.3.1",
+)
+
+go_repository(
+    name = "org_golang_google_appengine",
+    importpath = "google.golang.org/appengine",
+    sum = "h1:FZR1q0exgwxzPzp/aF+VccGrSfxfPpkBqjIIEq3ru6c=",
+    version = "v1.6.7",
+)
+
+go_repository(
+    name = "org_golang_google_genproto_googleapis_rpc",
+    importpath = "google.golang.org/genproto/googleapis/rpc",
+    sum = "h1:a2MQQVoTo96JC9PMGtGBymLp7+/RzpFc2yX/9WfFg1c=",
+    version = "v0.0.0-20231012201019-e917dd12ba7a",
+)
+
+go_repository(
+    name = "org_uber_go_multierr",
+    importpath = "go.uber.org/multierr",
+    sum = "h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=",
+    version = "v1.11.0",
+)
+
+go_repository(
+    name = "org_golang_x_crypto",
+    importpath = "golang.org/x/crypto",
+    sum = "h1:wBqGXzWJW6m1XrIKlAH0Hs1JJ7+9KBwnIO8v66Q9cHc=",
+    version = "v0.14.0",
+)
+
+go_repository(
+    name = "org_golang_x_net",
+    importpath = "golang.org/x/net",
+    sum = "h1:pVaXccu2ozPjCXewfr1S7xza/zcXTity9cCdXQYSjIM=",
+    version = "v0.17.0",
+)
+
+go_repository(
+    name = "org_golang_x_sync",
+    importpath = "golang.org/x/sync",
+    sum = "h1:zxkM55ReGkDlKSM+Fu41A+zmbZuaPVbGMzvvdUPznYQ=",
+    version = "v0.4.0",
+)
+
+go_repository(
+    name = "org_golang_x_sys",
+    importpath = "golang.org/x/sys",
+    sum = "h1:Af8nKPmuFypiUBjVoU9V20FiaFXOcuZI21p0ycVYYGE=",
+    version = "v0.13.0",
+)
+
+go_repository(
+    name = "org_golang_x_text",
+    importpath = "golang.org/x/text",
+    sum = "h1:ablQoSUd0tRdKxZewP80B+BaqeKJuVhuRxj/dkrun3k=",
+    version = "v0.13.0",
 )
 
 # General go toolchain dependencies

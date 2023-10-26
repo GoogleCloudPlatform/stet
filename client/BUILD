@@ -38,7 +38,7 @@ go_library(
         "@com_github_golang_glog//:glog",
         "@com_github_google_tink_go//streamingaead/subtle:go_default_library",
         "@com_github_google_uuid//:uuid",
-        "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
+        "@com_google_cloud_go_kms//apiv1/kmspb:go_default_library",
         "@org_golang_google_protobuf//proto",
     ],
 )
@@ -63,7 +63,7 @@ go_test(
         "@com_github_google_go_cmp//cmp:go_default_library",
         "@com_github_google_tink_go//subtle/random:go_default_library",
         "@com_github_googleapis_gax_go_v2//:go_default_library",
-        "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
+        "@com_google_cloud_go_kms//apiv1/kmspb:go_default_library",
         "@org_golang_google_protobuf//proto",
         "@org_golang_google_protobuf//testing/protocmp:go_default_library",
         "@org_golang_google_protobuf//types/known/wrapperspb",

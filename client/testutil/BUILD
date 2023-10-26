@@ -10,8 +10,8 @@ go_library(
     importpath = "github.com/GoogleCloudPlatform/stet/client/testutil",
     deps = [
         "@com_github_googleapis_gax_go_v2//:go_default_library",
-        "@com_google_cloud_go//kms/apiv1:go_default_library",
-        "@go_googleapis//google/cloud/kms/v1:kms_go_proto",
+        "@com_google_cloud_go_kms//apiv1",
+        "@com_google_cloud_go_kms//apiv1/kmspb:go_default_library",
         "@org_golang_google_protobuf//types/known/wrapperspb",
     ],
 )

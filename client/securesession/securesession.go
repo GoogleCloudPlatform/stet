@@ -28,7 +28,7 @@ import (
 	"github.com/GoogleCloudPlatform/stet/client/ekmclient"
 	tpmclient "github.com/google/go-tpm-tools/client"
 	atpb "github.com/google/go-tpm-tools/proto/attest"
-	"github.com/google/go-tpm/tpm2"
+	"github.com/google/go-tpm/legacy/tpm2"
 
 	"github.com/GoogleCloudPlatform/stet/constants"
 	aepb "github.com/GoogleCloudPlatform/stet/proto/attestation_evidence_go_proto"
