@@ -23,9 +23,6 @@ jobs:
         run: |
           go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.26
           go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.1
-      - name: Install libtspi-dev (see https://github.com/google/go-tpm-tools/issues/109)
-        run: |
-          sudo apt install -y libtspi-dev
       - name: Generate protobuf language bindings
         run: |
           make all
@@ -48,9 +45,6 @@ jobs:
         with:
           path: "~/.cache/bazel"
           key: bazel
-      - name: Install libtspi-dev (see https://github.com/google/go-tpm-tools/issues/109)
-        run: |
-          sudo apt install -y libtspi-dev
       - name: Build all sources
         run: |
           bazel build //...
