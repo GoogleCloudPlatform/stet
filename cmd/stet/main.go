@@ -17,6 +17,7 @@ package main
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"io"
@@ -40,6 +41,9 @@ const (
 	// The default permissions (u=rw,g=r,o=r)for new files created by STET, prior to unmask.
 	defaultFilePerms os.FileMode = 0644
 )
+
+//go:embed notices/THIRD_PARTY_NOTICES
+var notices string
 
 // These variables can be overridden by ldflags, as GoReleaser does when
 // publishing new releases, to provide more information about the build.
@@ -439,6 +443,18 @@ func (*versionCmd) Execute(context.Context, *flag.FlagSet, ...any) subcommands.E
 	return subcommands.ExitSuccess
 }
 
+// noticesCmd handles CLI options for the notices command.
+type noticesCmd struct{}
+
+func (*noticesCmd) Name() string           { return "notices" }
+func (*noticesCmd) Synopsis() string       { return "prints notices for third-party dependencies" }
+func (*noticesCmd) Usage() string          { return "Usage: stet notices" }
+func (*noticesCmd) SetFlags(*flag.FlagSet) {}
+func (*noticesCmd) Execute(context.Context, *flag.FlagSet, ...any) subcommands.ExitStatus {
+	fmt.Println(notices)
+	return subcommands.ExitSuccess
+}
+
 func main() {
 	// If effective UID is 0 and real UID != 0, we invoked as user but need to deescalate.
 	euid := syscall.Geteuid()
@@ -458,6 +474,7 @@ func main() {
 	subcommands.Register(&encryptCmd{}, "")
 	subcommands.Register(&decryptCmd{}, "")
 	subcommands.Register(&versionCmd{}, "")
+	subcommands.Register(&noticesCmd{}, "")
 
 	ctx := context.Background()
 	os.Exit(int(subcommands.Execute(ctx)))

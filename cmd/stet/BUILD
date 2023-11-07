@@ -21,6 +21,9 @@ package(default_visibility = ["//visibility:private"])
 go_binary(
     name = "main",
     srcs = ["main.go"],
+    embedsrcs = [
+        "notices/THIRD_PARTY_NOTICES",  # keep
+    ],
     deps = [
         "//client",
         "//proto:config_go_proto",
