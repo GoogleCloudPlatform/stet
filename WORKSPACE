@@ -71,9 +71,9 @@ go_library(
     visibility = ["//visibility:public"],
 )
 """,
-    sha256 = "240d9b6fd17d5c8bc544695cae0a3529f45b5ed0c0ccece3e791ffe5eef7520a",
-    strip_prefix = "vault-1.14.5",
-    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.14.5.tar.gz"],
+    sha256 = "0f186c600cbe2c098ff0407d8ea28250f269d043b51d22cfe9c4a568c4711e7a",
+    strip_prefix = "vault-1.14.6",
+    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.14.6.tar.gz"],
 )
 
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
