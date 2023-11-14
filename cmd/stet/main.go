@@ -432,7 +432,7 @@ type versionCmd struct{}
 
 func (*versionCmd) Name() string           { return "version" }
 func (*versionCmd) Synopsis() string       { return "prints the current version" }
-func (*versionCmd) Usage() string          { return "Usage: stet version" }
+func (*versionCmd) Usage() string          { return "Usage: stet version\n" }
 func (*versionCmd) SetFlags(*flag.FlagSet) {}
 func (*versionCmd) Execute(context.Context, *flag.FlagSet, ...any) subcommands.ExitStatus {
 	if version == "" {
@@ -471,10 +471,14 @@ func main() {
 	flag.Parse()
 
 	subcommands.Register(subcommands.HelpCommand(), "")
+	subcommands.Register(subcommands.FlagsCommand(), "")
 	subcommands.Register(&encryptCmd{}, "")
 	subcommands.Register(&decryptCmd{}, "")
 	subcommands.Register(&versionCmd{}, "")
 	subcommands.Register(&noticesCmd{}, "")
+
+	subcommands.ImportantFlag("stderrthreshold")
+	subcommands.ImportantFlag("log_dir")
 
 	ctx := context.Background()
 	os.Exit(int(subcommands.Execute(ctx)))
