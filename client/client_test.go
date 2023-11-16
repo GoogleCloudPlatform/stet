@@ -1772,3 +1772,54 @@ func TestNewConfspaceConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestEnoughUnwrappedShares(t *testing.T) {
+	testShare := shares.UnwrappedShare{[]byte("test share"), "test hash"}
+	testcases := []struct {
+		name      string
+		shares    []shares.UnwrappedShare
+		config    *configpb.KeyConfig
+		expectErr bool
+	}{
+		{
+			name:   "With no split",
+			shares: []shares.UnwrappedShare{testShare},
+			config: &configpb.KeyConfig{
+				KeySplittingAlgorithm: &configpb.KeyConfig_NoSplit{true},
+			},
+		},
+		{
+			name:   "With shamir config",
+			shares: []shares.UnwrappedShare{testShare, testShare},
+			config: &configpb.KeyConfig{
+				KeySplittingAlgorithm: &configpb.KeyConfig_Shamir{&configpb.ShamirConfig{Threshold: 2, Shares: 2}},
+			},
+		},
+		{
+			name:   "Zero shares",
+			shares: []shares.UnwrappedShare{},
+			config: &configpb.KeyConfig{
+				KeySplittingAlgorithm: &configpb.KeyConfig_NoSplit{true},
+			},
+			expectErr: true,
+		},
+		{
+			name:   "Less shares than shamir threshold",
+			shares: []shares.UnwrappedShare{testShare},
+			config: &configpb.KeyConfig{
+				KeySplittingAlgorithm: &configpb.KeyConfig_Shamir{&configpb.ShamirConfig{Threshold: 2, Shares: 2}},
+			},
+			expectErr: true,
+		},
+	}
+
+	for _, tc := range testcases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := enoughUnwrappedShares(tc.shares, tc.config)
+
+			if (err != nil) != tc.expectErr {
+				t.Errorf("enoughWrappedShares did not return expected output: want (err == nil) == %v, got %v", tc.expectErr, err)
+			}
+		})
+	}
+}
