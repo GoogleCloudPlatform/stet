@@ -169,6 +169,10 @@ func EstablishSecureSession(ctx context.Context, addr, authToken string, opts ..
 
 	// Continue making Handshake requests until the TLS handshake is complete.
 	for client.state != clientStateHandshakeCompleted {
+		if client.state == clientStateFailed {
+			return nil, fmt.Errorf("error on handshake: client in failure state")
+		}
+
 		if err := client.handshake(ctx); err != nil {
 			return nil, fmt.Errorf("error on handshake: %v", err)
 		}
@@ -219,6 +223,7 @@ func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool,
 	go func() {
 		if err := c.tls.Handshake(); err != nil {
 			glog.Errorf("Inner TLS handshake failed: %v", err.Error())
+			c.state = clientStateFailed
 			return
 		}
 		glog.Infof("Inner TLS handshake succeeded")
