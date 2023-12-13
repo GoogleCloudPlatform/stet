@@ -88,6 +88,7 @@ func CreateEnabledCryptoKey(protectionLevel kmsrpb.ProtectionLevel) *kmsrpb.Cryp
 	}
 
 	if protectionLevel == kmsrpb.ProtectionLevel_EXTERNAL {
+		ck.Primary.Name = TestExternalCloudKEKName
 		ck.Primary.ExternalProtectionLevelOptions = &kmsrpb.ExternalProtectionLevelOptions{
 			ExternalKeyUri: TestExternalKEKURI,
 		}

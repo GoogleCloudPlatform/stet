@@ -96,38 +96,28 @@ func TestParseEKMKeyURI(t *testing.T) {
 	}
 }
 
-func TestGetKekMetadata(t *testing.T) {
+func TestGetKekCryptoKey(t *testing.T) {
 	ctx := context.Background()
 
 	testcases := []struct {
 		name            string
 		protectionLevel kmsrpb.ProtectionLevel
-		kekInfo         *configpb.KekInfo
-		expectedURI     string
+		expectedName    string
 	}{
 		{
 			name:            "HSM Protection Level",
 			protectionLevel: kmsrpb.ProtectionLevel_HSM,
-			kekInfo: &configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI + "1"},
-			},
-			expectedURI: testutil.TestKEKURI + "1",
+			expectedName:    testutil.TestKEKName,
 		},
 		{
 			name:            "Software Protection Level",
 			protectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
-			kekInfo: &configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI + "2"},
-			},
-			expectedURI: testutil.TestKEKURI + "2",
+			expectedName:    testutil.TestKEKName,
 		},
 		{
 			name:            "External Protection Level",
 			protectionLevel: kmsrpb.ProtectionLevel_EXTERNAL,
-			kekInfo: &configpb.KekInfo{
-				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI + "3"},
-			},
-			expectedURI: testutil.TestExternalKEKURI,
+			expectedName:    testutil.TestExternalCloudKEKName,
 		},
 	}
 
@@ -139,18 +129,23 @@ func TestGetKekMetadata(t *testing.T) {
 					return ck, nil
 				},
 			}
-			kekMetadata, err := getKekURIMetadata(ctx, kmsClient, tc.kekInfo)
-			if err != nil {
-				t.Fatalf("getKekMetadata(ctx, %v) returned with error %v", tc.kekInfo, err)
+
+			kekInfo := &configpb.KekInfo{
+				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
 			}
-			if kekMetadata.uri != tc.expectedURI {
-				t.Errorf("getKekMetadata(ctx, %v) did not return the expected URI. Got %v, want %v", tc.kekInfo, kekMetadata.uri, tc.expectedURI)
+
+			cryptoKey, err := getKekCryptoKey(ctx, kmsClient, kekInfo)
+			if err != nil {
+				t.Fatalf("getKekCryptoKey returned with error %v", err)
+			}
+			if cryptoKey.GetPrimary().GetName() != tc.expectedName {
+				t.Errorf("getKekCryptoKey did not return the expected name. Got %v, want %v", cryptoKey.GetPrimary().GetName(), tc.expectedName)
 			}
 		})
 	}
 }
 
-func TestGetKekMetadataRSAFingerprint(t *testing.T) {
+func TestGetKekCryptoKeyRSAFingerprint(t *testing.T) {
 	ctx := context.Background()
 
 	kekInfo := &configpb.KekInfo{
@@ -164,12 +159,12 @@ func TestGetKekMetadataRSAFingerprint(t *testing.T) {
 		},
 	}
 
-	if _, err := getKekURIMetadata(ctx, kmsClient, kekInfo); err == nil {
-		t.Errorf("getKekMetadata returned successful, expect error.")
+	if _, err := getKekCryptoKey(ctx, kmsClient, kekInfo); err == nil {
+		t.Errorf("getKekCryptoKey returned successful, expect error.")
 	}
 }
 
-func TestGetKekMetadataErrors(t *testing.T) {
+func TestGetKekCryptoKeyErrors(t *testing.T) {
 	ctx := context.Background()
 	validKekInfo := &configpb.KekInfo{
 		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestKEKURI},
@@ -218,22 +213,6 @@ func TestGetKekMetadataErrors(t *testing.T) {
 			expectedErrSubstr: "unspecified protection level",
 		},
 		{
-			name: "External protection level without ExternalProtectionLevelOptions",
-			fakeKmsClient: &testutil.FakeKeyManagementClient{
-				GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
-					return &kmsrpb.CryptoKey{
-						Primary: &kmsrpb.CryptoKeyVersion{
-							Name:            "projects/test/locations/test/keyRings/test/cryptoKeys/test/cryptoKeyVersions/test",
-							State:           kmsrpb.CryptoKeyVersion_ENABLED,
-							ProtectionLevel: kmsrpb.ProtectionLevel_EXTERNAL,
-						},
-					}, nil
-				},
-			},
-			kekInfo:           validKekInfo,
-			expectedErrSubstr: "external protection level options",
-		},
-		{
 			name:          "KEK URI lacks GCP KMS identifying prefix",
 			fakeKmsClient: &testutil.FakeKeyManagementClient{},
 			kekInfo: &configpb.KekInfo{
@@ -247,12 +226,61 @@ func TestGetKekMetadataErrors(t *testing.T) {
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
-			_, err := getKekURIMetadata(ctx, testCase.fakeKmsClient, testCase.kekInfo)
+			_, err := getKekCryptoKey(ctx, testCase.fakeKmsClient, testCase.kekInfo)
 
 			if err == nil {
 				t.Errorf("getKekMetadata returned no error, expected error related to \"%s\"", testCase.expectedErrSubstr)
 			}
 		})
+	}
+}
+
+func TestExternalKEKMetadata(t *testing.T) {
+	cryptoKey := &kmsrpb.CryptoKey{
+		Primary: &kmsrpb.CryptoKeyVersion{
+			State:           kmsrpb.CryptoKeyVersion_ENABLED,
+			ProtectionLevel: kmsrpb.ProtectionLevel_EXTERNAL,
+			ExternalProtectionLevelOptions: &kmsrpb.ExternalProtectionLevelOptions{
+				ExternalKeyUri: testutil.TestExternalKEKURI,
+			},
+		},
+	}
+
+	kekInfo := &configpb.KekInfo{
+		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestExternalCloudKEKURI},
+	}
+
+	expectedMD := &kekMetadata{
+		protectionLevel: kmsrpb.ProtectionLevel_EXTERNAL,
+		uri:             testutil.TestExternalKEKURI,
+		resourceName:    testutil.TestExternalCloudKEKName,
+	}
+
+	md, err := externalKEKMetadata(cryptoKey, kekInfo)
+	if err != nil {
+		t.Fatalf("getKekMetadata returned error: %v", err)
+	}
+
+	if !cmp.Equal(md, expectedMD, cmp.AllowUnexported(kekMetadata{})) {
+		t.Errorf("getKekMetadata returned wrapped share. Got %v, want %v", md, expectedMD)
+	}
+}
+
+func TestExternalKEKMetadataError(t *testing.T) {
+	cryptoKey := &kmsrpb.CryptoKey{
+		Primary: &kmsrpb.CryptoKeyVersion{
+			State:           kmsrpb.CryptoKeyVersion_ENABLED,
+			ProtectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
+		},
+	}
+
+	kekInfo := &configpb.KekInfo{
+		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestExternalCloudKEKURI},
+	}
+
+	_, err := externalKEKMetadata(cryptoKey, kekInfo)
+	if err == nil {
+		t.Errorf("getKekMetadata returned successfully, expected error")
 	}
 }
 
@@ -880,6 +908,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 		name         string
 		uri          string
 		wrappedShare []*configpb.WrappedShare
+		expectedURI  string
 	}{
 		{
 			name: "Software Protection Level",
@@ -890,6 +919,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 					Hash:  expectedHashedShare,
 				},
 			},
+			expectedURI: testutil.TestSoftwareKEKURI,
 		},
 		{
 			name: "Hardware Protection Level",
@@ -900,6 +930,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 					Hash:  expectedHashedShare,
 				},
 			},
+			expectedURI: testutil.TestHSMKEKURI,
 		},
 		{
 			name: "External Protection Level",
@@ -910,6 +941,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 					Hash:  expectedHashedShare,
 				},
 			},
+			expectedURI: testutil.TestExternalKEKURI,
 		},
 	}
 
@@ -940,8 +972,12 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 				t.Fatalf("unwrapAndValidateShares did not return the expected number of shares. Got %v, want %v", len(unwrappedShares), len(testCase.wrappedShare))
 			}
 
+			if unwrappedShares[0].URI != testCase.expectedURI {
+				t.Errorf("unwrapAndValidateShares did not return the expected hashed share. Got %v, want %v", unwrappedShares[0].URI, testCase.expectedURI)
+			}
+
 			if !bytes.Equal(unwrappedShares[0].Share, expectedUnwrappedShare) {
-				t.Errorf("unwrapAndValidateShares did not return the expected unwrapped share. Got %v, want %v", unwrappedShares[0], testCase.wrappedShare)
+				t.Errorf("unwrapAndValidateShares did not return the expected unwrapped share. Got %v, want %v", unwrappedShares[0], expectedUnwrappedShare)
 			}
 		})
 	}
@@ -1281,6 +1317,7 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 	}
 
 	ctx := context.Background()
+
 	stetClient := &StetClient{
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
@@ -1341,6 +1378,7 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 	plaintext := []byte("This is data to be encrypted.")
 
 	ctx := context.Background()
+
 	stetClient := &StetClient{
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
