@@ -38,13 +38,13 @@ func TestWrapKMSShareSucceeds(t *testing.T) {
 	}{
 		{
 			name:         "HSM",
-			kekName:      testutil.TestHSMKEKName,
-			expectedWrap: testutil.FakeKMSWrap(testShare, testutil.TestHSMKEKName),
+			kekName:      testutil.HSMKEK.Name,
+			expectedWrap: testutil.FakeKMSWrap(testShare, testutil.HSMKEK.Name),
 		},
 		{
 			name:         "Software",
-			kekName:      testutil.TestSoftwareKEKName,
-			expectedWrap: testutil.FakeKMSWrap(testShare, testutil.TestSoftwareKEKName),
+			kekName:      testutil.SoftwareKEK.Name,
+			expectedWrap: testutil.FakeKMSWrap(testShare, testutil.SoftwareKEK.Name),
 		},
 	}
 
@@ -74,7 +74,7 @@ func TestWrapKMSShareFails(t *testing.T) {
 		{
 			name: "Plaintext corrupted",
 			encryptResponse: &kmsspb.EncryptResponse{
-				Name:                    testutil.TestKEKName,
+				Name:                    testutil.SoftwareKEK.Name,
 				Ciphertext:              []byte("Ciphertext"),
 				CiphertextCrc32C:        wrapperspb.Int64(int64(crc32c([]byte("Ciphertext")))),
 				VerifiedPlaintextCrc32C: false,
@@ -84,7 +84,7 @@ func TestWrapKMSShareFails(t *testing.T) {
 		{
 			name: "Ciphertext corrupted",
 			encryptResponse: &kmsspb.EncryptResponse{
-				Name:                    testutil.TestKEKName,
+				Name:                    testutil.SoftwareKEK.Name,
 				Ciphertext:              []byte("Ciphertext"),
 				CiphertextCrc32C:        wrapperspb.Int64(10),
 				VerifiedPlaintextCrc32C: true,
@@ -108,11 +108,11 @@ func TestWrapKMSShareFails(t *testing.T) {
 				},
 			}
 
-			opts := WrapOpts{Share: []byte(plaintext), KeyName: testutil.TestKEKName}
+			opts := WrapOpts{Share: []byte(plaintext), KeyName: testutil.SoftwareKEK.Name}
 			_, err := WrapShare(ctx, fakeKMSClient, opts)
 
 			if err == nil {
-				t.Errorf("wrapKMSShare(%v, %v) = nil error, want error", plaintext, testutil.TestKEKName)
+				t.Errorf("wrapKMSShare(%v, %v) = nil error, want error", plaintext, testutil.SoftwareKEK.Name)
 			}
 		})
 	}
@@ -124,8 +124,8 @@ func TestUnwrapKMSShareSucceeds(t *testing.T) {
 		name    string
 		kekName string
 	}{
-		{"HSM", testutil.TestHSMKEKName},
-		{"Software", testutil.TestSoftwareKEKName},
+		{"HSM", testutil.HSMKEK.Name},
+		{"Software", testutil.SoftwareKEK.Name},
 	}
 
 	ctx := context.Background()
@@ -178,11 +178,11 @@ func TestUnwrapKMSShareFails(t *testing.T) {
 				},
 			}
 
-			opts := UnwrapOpts{Share: plaintext, KeyName: testutil.TestKEKName}
+			opts := UnwrapOpts{Share: plaintext, KeyName: testutil.SoftwareKEK.Name}
 			_, err := UnwrapShare(ctx, fakeKMSClient, opts)
 
 			if err == nil {
-				t.Errorf("unwrapKMSShare(ctx, %v, %v) = nil error, want error", plaintext, testutil.TestKEKName)
+				t.Errorf("unwrapKMSShare(ctx, %v, %v) = nil error, want error", plaintext, testutil.SoftwareKEK.Name)
 			}
 		})
 	}

@@ -99,9 +99,11 @@ func TestSingleCreds(t *testing.T) {
 	ctx := context.Background()
 	tokenFile := testutil.CreateTempTokenFile(t)
 
+	uri := gcpKeyPrefix + "projects/test/locations/test/keyRings/test/cryptoKeys/testConfSpace"
+
 	noSplitConfig := &configpb.KeyConfig{
 		KekInfos: []*configpb.KekInfo{
-			{KekType: &configpb.KekInfo_KekUri{KekUri: testutil.TestConfSpaceKEKURI}},
+			{KekType: &configpb.KekInfo_KekUri{KekUri: uri}},
 		},
 		DekAlgorithm:          configpb.DekAlgorithm_AES256_GCM,
 		KeySplittingAlgorithm: &configpb.KeyConfig_NoSplit{true},
@@ -118,7 +120,7 @@ func TestSingleCreds(t *testing.T) {
 		{
 			name:            "single share with encrypt_and_decrypt_mode",
 			keyConfig:       noSplitConfig,
-			credsURIPattern: testutil.TestConfSpaceKEKURI,
+			credsURIPattern: uri,
 			credsMode:       configpb.CredentialMode_DEFAULT_ENCRYPT_AND_DECRYPT_MODE,
 			credsClient:     createTestKMSClient(t, encryptAndDecrypt),
 			defaultClient:   createTestKMSClient(t, errorOnly),
@@ -126,7 +128,7 @@ func TestSingleCreds(t *testing.T) {
 		{
 			name:            "single share with encrypt_only_mode",
 			keyConfig:       noSplitConfig,
-			credsURIPattern: testutil.TestConfSpaceKEKURI,
+			credsURIPattern: uri,
 			credsMode:       configpb.CredentialMode_ENCRYPT_ONLY_MODE,
 			credsClient:     createTestKMSClient(t, encryptOnly),
 			defaultClient:   createTestKMSClient(t, decryptOnly),
@@ -134,7 +136,7 @@ func TestSingleCreds(t *testing.T) {
 		{
 			name:            "single share with decrypt_only_mode",
 			keyConfig:       noSplitConfig,
-			credsURIPattern: testutil.TestConfSpaceKEKURI,
+			credsURIPattern: uri,
 			credsMode:       configpb.CredentialMode_DECRYPT_ONLY_MODE,
 			credsClient:     createTestKMSClient(t, decryptOnly),
 			defaultClient:   createTestKMSClient(t, encryptOnly),

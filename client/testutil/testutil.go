@@ -29,35 +29,45 @@ import (
 )
 
 var (
-	gcpKMSPrefix = "gcp-kms://"
+	gcpKMSPrefix       = "gcp-kms://"
+	cryptoKeyVerSuffix = "/cryptoKeyVersions/test"
 
-	// TestKEKName is a test key name for a KEK.
-	TestKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/test"
-	// TestKEKURI is a test KEK URI corresponding to TestKEKName.
-	TestKEKURI = gcpKMSPrefix + TestKEKName
-
-	// TestExternalCloudKEKName is a test Cloud KMS key name for an external KEK.
-	TestExternalCloudKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/testExternal"
-	// TestExternalCloudKEKURI is a test KEK URI corresponding to TestExternalCloudKEKName.
-	TestExternalCloudKEKURI = gcpKMSPrefix + TestExternalCloudKEKName
-	// TestExternalKEKURI is the external URI for an EKM-managed KEK.
-	TestExternalKEKURI = "https://my-kms.io/external-key"
-
-	// TestHSMKEKName is a test key name for an HSM-protected KEK.
-	TestHSMKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/testHsm"
-	// TestHSMKEKURI is a test KEK URI corresponding to TestHSMKEKName.
-	TestHSMKEKURI = gcpKMSPrefix + TestHSMKEKName
-
-	// TestSoftwareKEKName is a test key name for a software-protected KEK.
-	TestSoftwareKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/testSoftware"
-	// TestSoftwareKEKURI is a test KEK URI corresponding to TestSoftwareKEKName.
-	TestSoftwareKEKURI = gcpKMSPrefix + TestSoftwareKEKName
-
-	// TestConfSpaceKEKName is a test key name for a Confidential Space key.
-	TestConfSpaceKEKName = "projects/test/locations/test/keyRings/test/cryptoKeys/testConfSpace"
-	// TestConfSpaceKEKURI is a test key name for a Confidential Space key.
-	TestConfSpaceKEKURI = gcpKMSPrefix + TestConfSpaceKEKName
+	// ExternalEKMURI is the external URI corresponding to ExternalKEK.
+	ExternalEKMURI = "https://my-kms.io/external-key"
 )
+
+func newKEK(nameSuffix string, protectionLevel kmsrpb.ProtectionLevel) *KEK {
+	return &KEK{
+		Name:            "projects/test/locations/test/keyRings/test/cryptoKeys" + nameSuffix,
+		ProtectionLevel: protectionLevel,
+	}
+}
+
+// KEK contains basic information about test KEKs.
+type KEK struct {
+	Name            string
+	ProtectionLevel kmsrpb.ProtectionLevel
+}
+
+// URI returns the KEK's CloudKMS URI by appending the GCP KMS prefix to the key name.
+func (k *KEK) URI() string {
+	return gcpKMSPrefix + k.Name
+}
+
+var (
+	// SoftwareKEK represents a test KEK with the Software protection level.
+	SoftwareKEK = newKEK("testSoftware", kmsrpb.ProtectionLevel_SOFTWARE)
+	// HSMKEK represents a test KEK with the HSM protection level.
+	HSMKEK = newKEK("testHsm", kmsrpb.ProtectionLevel_HSM)
+	// ExternalKEK represents a test KEK with the External protection level.
+	ExternalKEK = newKEK("testExternal", kmsrpb.ProtectionLevel_EXTERNAL)
+)
+
+var defaultKEKs map[kmsrpb.ProtectionLevel]*KEK = map[kmsrpb.ProtectionLevel]*KEK{
+	kmsrpb.ProtectionLevel_HSM:      SoftwareKEK,
+	kmsrpb.ProtectionLevel_SOFTWARE: HSMKEK,
+	kmsrpb.ProtectionLevel_EXTERNAL: ExternalKEK,
+}
 
 // CreateTempTokenFile creates a temp directory/file as a stand-in for the attestation token.
 func CreateTempTokenFile(t *testing.T) string {
@@ -77,20 +87,27 @@ func CRC32C(data []byte) uint32 {
 	return crc32.Checksum(data, t)
 }
 
-// CreateEnabledCryptoKey creates a fake CryptoKey with the given protection level.
-func CreateEnabledCryptoKey(protectionLevel kmsrpb.ProtectionLevel) *kmsrpb.CryptoKey {
+// CreateEnabledCryptoKey creates a fake CryptoKey with the given protection level and name of the
+// format "projects/*/locations/*/keyRings/*/cryptoKeys/*".
+func CreateEnabledCryptoKey(protectionLevel kmsrpb.ProtectionLevel, name string) *kmsrpb.CryptoKey {
+	// If a custom name was specified, use it. Otherwise, use the default test URI for that protection level.
+	if len(name) == 0 {
+		name = defaultKEKs[protectionLevel].Name
+	}
+
 	ck := &kmsrpb.CryptoKey{
+		Name: name,
 		Primary: &kmsrpb.CryptoKeyVersion{
-			Name:            TestKEKName,
+			Name:            name + cryptoKeyVerSuffix,
 			State:           kmsrpb.CryptoKeyVersion_ENABLED,
 			ProtectionLevel: protectionLevel,
 		},
 	}
 
+	// For external protection level, add ExternalProtectionLevelOptions and external URI.
 	if protectionLevel == kmsrpb.ProtectionLevel_EXTERNAL {
-		ck.Primary.Name = TestExternalCloudKEKName
 		ck.Primary.ExternalProtectionLevelOptions = &kmsrpb.ExternalProtectionLevelOptions{
-			ExternalKeyUri: TestExternalKEKURI,
+			ExternalKeyUri: ExternalEKMURI,
 		}
 	}
 
@@ -106,17 +123,13 @@ type FakeKeyManagementClient struct {
 	DecryptFunc      func(context.Context, *kmsspb.DecryptRequest, ...gax.CallOption) (*kmsspb.DecryptResponse, error)
 }
 
-func fakeKMSProtectionLevel(name string) kmsrpb.ProtectionLevel {
-	switch name {
-	case TestHSMKEKName:
-		return kmsrpb.ProtectionLevel_HSM
-	case TestSoftwareKEKName:
-		return kmsrpb.ProtectionLevel_SOFTWARE
-	case TestExternalCloudKEKName:
-		return kmsrpb.ProtectionLevel_EXTERNAL
-	default:
-		return kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED
+func protectionLevelFromName(name string) kmsrpb.ProtectionLevel {
+	for k, v := range defaultKEKs {
+		if v.Name == name {
+			return k
+		}
 	}
+	return kmsrpb.ProtectionLevel_PROTECTION_LEVEL_UNSPECIFIED
 }
 
 func (f *FakeKeyManagementClient) GetCryptoKey(ctx context.Context, req *kmsspb.GetCryptoKeyRequest, opts ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
@@ -124,15 +137,15 @@ func (f *FakeKeyManagementClient) GetCryptoKey(ctx context.Context, req *kmsspb.
 		return f.GetCryptoKeyFunc(ctx, req, opts...)
 	}
 
-	return CreateEnabledCryptoKey(fakeKMSProtectionLevel(req.GetName())), nil
+	return CreateEnabledCryptoKey(protectionLevelFromName(req.GetName()), req.GetName()), nil
 }
 
 // FakeKMSWrap returns a fake wrapped share.
 func FakeKMSWrap(unwrapped []byte, name string) []byte {
 	switch name {
-	case TestHSMKEKName:
+	case HSMKEK.Name:
 		return append(unwrapped, byte('H'))
-	case TestSoftwareKEKName:
+	case SoftwareKEK.Name:
 		return append(unwrapped, byte('S'))
 	default:
 		return append(unwrapped, byte('U'))
@@ -164,9 +177,9 @@ func (f *FakeKeyManagementClient) Encrypt(ctx context.Context, req *kmsspb.Encry
 func FakeKMSUnwrap(wrapped []byte, name string) []byte {
 	var final byte
 	switch name {
-	case TestHSMKEKName:
+	case HSMKEK.Name:
 		final = 'H'
-	case TestSoftwareKEKName:
+	case SoftwareKEK.Name:
 		final = 'S'
 	default:
 		final = 'U'
