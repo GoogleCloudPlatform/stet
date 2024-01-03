@@ -20,12 +20,14 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/url"
 	"path"
 	"strings"
 
+	kms "cloud.google.com/go/kms/apiv1"
 	rpb "cloud.google.com/go/kms/apiv1/kmspb"
 	spb "cloud.google.com/go/kms/apiv1/kmspb"
 	"github.com/GoogleCloudPlatform/stet/client/cloudkms"
@@ -33,9 +35,11 @@ import (
 	"github.com/GoogleCloudPlatform/stet/client/jwt"
 	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/client/shares"
+	"github.com/GoogleCloudPlatform/stet/client/vpc"
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	glog "github.com/golang/glog"
 	"github.com/google/uuid"
+	"google.golang.org/api/option"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -62,8 +66,16 @@ type StetClient struct {
 	testKMSClients      *cloudkms.ClientFactory
 	testConfspaceConfig *confidentialspace.Config
 
+	// Client for contacting the Cloud EKM service. Initialized via initializeCloudEkmClient.
+	// Only used to retrieve connection information for EXTERNAL_VPC protected keys.
+	testCloudEKMClient vpc.CloudEKMClient
+
 	// Fake Secure Session Client for testing purposes.
 	testSecureSessionClient secureSessionClient
+
+	// TLS certs to use for establishing communication with EKM. Used for specifying TLS certs for VPC
+	// connections.
+	ekmCertPool *x509.CertPool
 
 	// Whether to skip verification of the inner TLS session cert.
 	InsecureSkipVerify bool
@@ -71,6 +83,27 @@ type StetClient struct {
 	// The version of STET, if set. This is used to construct user agent
 	// strings for Cloud KMS requests.
 	Version string
+}
+
+// newCloudEKMClient initializes the StetClient's `cloudEKMClient`.
+// Performs a no-op if it has already been initialized.
+func (c *StetClient) newCloudEKMClient(ctx context.Context, credentials string) (vpc.CloudEKMClient, error) {
+	if c.testCloudEKMClient != nil {
+		return c.testCloudEKMClient, nil
+	}
+
+	opts := []option.ClientOption{}
+	if len(credentials) != 0 {
+		opts = append(opts, option.WithCredentialsJSON([]byte(credentials)))
+	}
+
+	var err error
+	client, err := kms.NewEkmClient(ctx, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("error creating Cloud EKM client: %v", err)
+	}
+
+	return client, nil
 }
 
 // parseEKMKeyURI takes in the key URI for a key stored in an EKM, and returns
@@ -86,7 +119,7 @@ func parseEKMKeyURI(keyURI string) (string, string, error) {
 }
 
 // ekmSecureSessionWrap creates a secure session with the external EKM denoted by the given URI, and uses it to encrypt unwrappedShare.
-func (c *StetClient) ekmSecureSessionWrap(ctx context.Context, unwrappedShare []byte, md kekMetadata) ([]byte, error) {
+func (c *StetClient) ekmSecureSessionWrap(ctx context.Context, unwrappedShare []byte, md kekMetadata, ekmCertPool *x509.CertPool) ([]byte, error) {
 	addr, keyPath, err := parseEKMKeyURI(md.uri)
 	if err != nil {
 		return nil, err
@@ -101,7 +134,7 @@ func (c *StetClient) ekmSecureSessionWrap(ctx context.Context, unwrappedShare []
 			return nil, err
 		}
 
-		ekmClient, err = securesession.EstablishSecureSession(ctx, md.uri, authToken, securesession.SkipTLSVerify(c.InsecureSkipVerify))
+		ekmClient, err = securesession.EstablishSecureSession(ctx, md.uri, authToken, securesession.HTTPCertPool(ekmCertPool), securesession.SkipTLSVerify(c.InsecureSkipVerify))
 		if err != nil {
 			return nil, fmt.Errorf("error establishing secure session: %v", err)
 		}
@@ -120,7 +153,7 @@ func (c *StetClient) ekmSecureSessionWrap(ctx context.Context, unwrappedShare []
 }
 
 // ekmSecureSessionUnwrap creates a secure session with the external EKM denoted by the given URI, and uses it to decrypt wrappedShare.
-func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []byte, md kekMetadata) ([]byte, error) {
+func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []byte, md kekMetadata, ekmCertPool *x509.CertPool) ([]byte, error) {
 	addr, keyPath, err := parseEKMKeyURI(md.uri)
 	if err != nil {
 		return nil, err
@@ -135,7 +168,7 @@ func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []
 			return nil, err
 		}
 
-		ekmClient, err = securesession.EstablishSecureSession(ctx, md.uri, authToken, securesession.SkipTLSVerify(c.InsecureSkipVerify))
+		ekmClient, err = securesession.EstablishSecureSession(ctx, md.uri, authToken, securesession.HTTPCertPool(ekmCertPool), securesession.SkipTLSVerify(c.InsecureSkipVerify))
 		if err != nil {
 			return nil, fmt.Errorf("error establishing secure session: %v", err)
 		}
@@ -205,6 +238,25 @@ func externalKEKMetadata(cryptoKey *rpb.CryptoKey, kek *configpb.KekInfo) (*kekM
 
 	return kmd, nil
 
+}
+
+func (c *StetClient) getExternalVPCKeyInfo(ctx context.Context, kek *configpb.KekInfo, cryptoKey *rpb.CryptoKey, credentials string) (*kekMetadata, *x509.CertPool, error) {
+	ekmClient, err := c.newCloudEKMClient(ctx, credentials)
+	if err != nil {
+		return nil, nil, fmt.Errorf("error creating KMS EKM Client: %w", err)
+	}
+	defer ekmClient.Close()
+
+	ekmURI, ekmCerts, err := vpc.GetURIAndCerts(ctx, ekmClient, cryptoKey)
+	if err != nil {
+		return nil, nil, fmt.Errorf("Error getting uri and certificates for KEK %v: %v", kek.GetKekUri(), err)
+	}
+
+	return &kekMetadata{
+		protectionLevel: rpb.ProtectionLevel_EXTERNAL_VPC,
+		uri:             ekmURI,
+		resourceName:    strings.TrimPrefix(kek.GetKekUri(), gcpKeyPrefix),
+	}, ekmCerts, nil
 }
 
 // wrapShares encrypts the given shares using either the given key URIs or the
@@ -288,7 +340,21 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, o
 					return nil, nil, fmt.Errorf("error creating KEK Metadata: %v", err)
 				}
 
-				ekmWrappedShare, err := c.ekmSecureSessionWrap(ctx, share, *kmd)
+				// A nil ekmCertPool indicates the host's Root CAs will be used to connect to the EKM.
+				ekmWrappedShare, err := c.ekmSecureSessionWrap(ctx, share, *kmd, nil)
+				if err != nil {
+					return nil, nil, fmt.Errorf("error wrapping with secure session: %v", err)
+				}
+
+				wrapped.Share = ekmWrappedShare
+				uri = kmd.uri
+			case rpb.ProtectionLevel_EXTERNAL_VPC:
+				kmd, ekmCerts, err := c.getExternalVPCKeyInfo(ctx, kek, cryptoKey, creds)
+				if err != nil {
+					return nil, nil, fmt.Errorf("error getting external VPC key info: %v", err)
+				}
+
+				ekmWrappedShare, err := c.ekmSecureSessionWrap(ctx, share, *kmd, ekmCerts)
 				if err != nil {
 					return nil, nil, fmt.Errorf("error wrapping with secure session: %v", err)
 				}
@@ -391,7 +457,19 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 					return nil, fmt.Errorf("error creating KEK Metadata: %v", err)
 				}
 
-				unwrapped.Share, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), *kmd)
+				unwrapped.Share, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), *kmd, nil)
+				if err != nil {
+					glog.Warningf("Error unwrapping with external EKM for %v: %v", kmd.uri, err)
+					continue
+				}
+				uri = kmd.uri
+			case rpb.ProtectionLevel_EXTERNAL_VPC:
+				kmd, ekmCerts, err := c.getExternalVPCKeyInfo(ctx, kek, cryptoKey, creds)
+				if err != nil {
+					return nil, fmt.Errorf("error getting external VPC key info: %v", err)
+				}
+
+				unwrapped.Share, err = c.ekmSecureSessionUnwrap(ctx, wrapped.GetShare(), *kmd, ekmCerts)
 				if err != nil {
 					glog.Errorf("Error unwrapping with external EKM for %v: %v", kmd.uri, err)
 					continue

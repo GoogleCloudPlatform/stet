@@ -188,7 +188,7 @@ func TestSingleCreds(t *testing.T) {
 					},
 				},
 				testConfspaceConfig:     confspace.NewConfigWithTokenFile(stetConfig.GetConfidentialSpaceConfigs(), tokenFile),
-				testSecureSessionClient: &fakeSecureSessionClient{},
+				testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 			}
 
 			plaintext := "test data"
@@ -307,7 +307,7 @@ func TestMultipleCreds(t *testing.T) {
 					CredsMap: tc.createCredsMap(creds),
 				},
 				testConfspaceConfig:     confspace.NewConfigWithTokenFile(stetConfig.GetConfidentialSpaceConfigs(), tokenFile),
-				testSecureSessionClient: &fakeSecureSessionClient{},
+				testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 			}
 
 			plaintext := "test data"
@@ -368,7 +368,7 @@ func TestCredsIgnoredIfNotInConfspace(t *testing.T) {
 			},
 		},
 		testConfspaceConfig:     confspace.NewConfigWithTokenFile(stetConfig.GetConfidentialSpaceConfigs(), tokenFile),
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	plaintext := "test data"

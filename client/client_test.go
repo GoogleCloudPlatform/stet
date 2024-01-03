@@ -24,7 +24,6 @@ import (
 
 	"github.com/GoogleCloudPlatform/stet/client/cloudkms"
 	confspace "github.com/GoogleCloudPlatform/stet/client/confidentialspace"
-	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/GoogleCloudPlatform/stet/client/shares"
 	"github.com/GoogleCloudPlatform/stet/client/testutil"
 	"github.com/google/go-cmp/cmp"
@@ -38,44 +37,6 @@ import (
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
-
-// Fake version of secure session client, used to communicate with external EKM.
-type fakeSecureSessionClient struct {
-	securesession.SecureSessionClient
-
-	wrapErr       error
-	unwrapErr     error
-	endSessionErr error
-}
-
-// Appends a single byte ('E') to the end of the plaintext to indicate the external protection level.
-func (f *fakeSecureSessionClient) ConfidentialWrap(_ context.Context, _, _ string, plaintext []byte) ([]byte, error) {
-	// Return configured error if one was set
-	if f.wrapErr != nil {
-		return nil, f.wrapErr
-	}
-
-	return append(plaintext, byte('E')), nil
-}
-
-// Removes the last byte of the wrapped share (mirroring the fake ConfidentalWrap above).
-func (f *fakeSecureSessionClient) ConfidentialUnwrap(_ context.Context, _, _ string, wrappedBlob []byte) ([]byte, error) {
-	// Return configured error if one was set
-	if f.unwrapErr != nil {
-		return nil, f.unwrapErr
-	}
-
-	return wrappedBlob[:len(wrappedBlob)-1], nil
-}
-
-func (f *fakeSecureSessionClient) EndSession(ctx context.Context) error {
-	// Return configured error if one was set
-	if f.endSessionErr != nil {
-		return f.endSessionErr
-	}
-
-	return nil
-}
 
 func TestParseEKMKeyURI(t *testing.T) {
 	keyURI := "https://test.ekm.io/endpoints/123456"
@@ -114,6 +75,10 @@ func TestGetKekCryptoKey(t *testing.T) {
 		{
 			name:    "External Protection Level",
 			testKEK: testutil.ExternalKEK,
+		},
+		{
+			name:    "External VPC Protection Level",
+			testKEK: testutil.VPCKEK,
 		},
 	}
 
@@ -288,9 +253,9 @@ func TestEkmSecureSessionWrap(t *testing.T) {
 	md := kekMetadata{uri: testutil.ExternalKEK.URI()}
 	expectedCiphertext := append(plaintext, byte('E'))
 
-	stetClient := &StetClient{testSecureSessionClient: &fakeSecureSessionClient{}}
+	stetClient := &StetClient{testSecureSessionClient: &testutil.FakeSecureSessionClient{}}
 
-	ciphertext, err := stetClient.ekmSecureSessionWrap(ctx, plaintext, md)
+	ciphertext, err := stetClient.ekmSecureSessionWrap(ctx, plaintext, md, nil)
 	if err != nil {
 		t.Fatalf("ekmSecureSessionWrap(ctx, \"%s\", \"%v\") returned error: %v", plaintext, md, err)
 	}
@@ -306,20 +271,20 @@ func TestEkmSecureSessionWrapError(t *testing.T) {
 
 	testCases := []struct {
 		name              string
-		fakeEkmClient     *fakeSecureSessionClient
+		fakeEkmClient     *testutil.FakeSecureSessionClient
 		expectedErrSubstr string
 	}{
 		{
 			name: "ConfidentialWrap returns error",
-			fakeEkmClient: &fakeSecureSessionClient{
-				wrapErr: errors.New("this is an error from ConfidentialWrap"),
+			fakeEkmClient: &testutil.FakeSecureSessionClient{
+				WrapErr: errors.New("this is an error from ConfidentialWrap"),
 			},
 			expectedErrSubstr: "wrapping",
 		},
 		{
 			name: "EndSession returns error",
-			fakeEkmClient: &fakeSecureSessionClient{
-				endSessionErr: errors.New("this is an error from EndSession"),
+			fakeEkmClient: &testutil.FakeSecureSessionClient{
+				EndSessionErr: errors.New("this is an error from EndSession"),
 			},
 			expectedErrSubstr: "ending secure session",
 		},
@@ -328,7 +293,7 @@ func TestEkmSecureSessionWrapError(t *testing.T) {
 	for _, testCase := range testCases {
 		stetClient := &StetClient{testSecureSessionClient: testCase.fakeEkmClient}
 
-		_, err := stetClient.ekmSecureSessionWrap(ctx, []byte("this is plaintext"), kekMetadata{uri: "this is a uri"})
+		_, err := stetClient.ekmSecureSessionWrap(ctx, []byte("this is plaintext"), kekMetadata{uri: "this is a uri"}, nil)
 		if err == nil {
 			t.Errorf("ekmSecureSessionWrap(context.Background, \"this is plaintext\", \"this is a uri\") returned no error, expected to return error related to %s", testCase.expectedErrSubstr)
 		}
@@ -341,9 +306,9 @@ func TestEkmSecureSessionUnwrap(t *testing.T) {
 	md := kekMetadata{uri: testutil.ExternalKEK.URI()}
 	ciphertext := append(expectedPlaintext, byte('E'))
 
-	stetClient := &StetClient{testSecureSessionClient: &fakeSecureSessionClient{}}
+	stetClient := &StetClient{testSecureSessionClient: &testutil.FakeSecureSessionClient{}}
 
-	plaintext, err := stetClient.ekmSecureSessionUnwrap(ctx, ciphertext, md)
+	plaintext, err := stetClient.ekmSecureSessionUnwrap(ctx, ciphertext, md, nil)
 	if err != nil {
 		t.Fatalf("ekmSecureSessionUnwrap(context.Background(), \"%s\", \"%v\") returned error: %v", ciphertext, md, err)
 	}
@@ -359,20 +324,20 @@ func TestEkmSecureSessionUnwrapError(t *testing.T) {
 
 	testCases := []struct {
 		name              string
-		fakeEkmClient     *fakeSecureSessionClient
+		fakeEkmClient     *testutil.FakeSecureSessionClient
 		expectedErrSubstr string
 	}{
 		{
 			name: "ConfidentialUnwrap returns error",
-			fakeEkmClient: &fakeSecureSessionClient{
-				unwrapErr: errors.New("this is an error from ConfidentialUnwrap"),
+			fakeEkmClient: &testutil.FakeSecureSessionClient{
+				UnwrapErr: errors.New("this is an error from ConfidentialUnwrap"),
 			},
 			expectedErrSubstr: "wrapping",
 		},
 		{
 			name: "EndSession returns error",
-			fakeEkmClient: &fakeSecureSessionClient{
-				endSessionErr: errors.New("this is an error from EndSession"),
+			fakeEkmClient: &testutil.FakeSecureSessionClient{
+				EndSessionErr: errors.New("this is an error from EndSession"),
 			},
 			expectedErrSubstr: "ending secure session",
 		},
@@ -381,7 +346,7 @@ func TestEkmSecureSessionUnwrapError(t *testing.T) {
 	for _, testCase := range testCases {
 		stetClient := &StetClient{testSecureSessionClient: testCase.fakeEkmClient}
 
-		_, err := stetClient.ekmSecureSessionUnwrap(ctx, []byte("this is ciphertext"), kekMetadata{uri: testutil.ExternalKEK.URI()})
+		_, err := stetClient.ekmSecureSessionUnwrap(ctx, []byte("this is ciphertext"), kekMetadata{uri: testutil.ExternalKEK.URI()}, nil)
 		if err == nil {
 			t.Errorf("ekmSecureSessionUnwrap(context.Background, \"this is ciphertext\", %v) returned no error, expected to return error related to %s", testutil.ExternalKEK.URI(), testCase.expectedErrSubstr)
 		}
@@ -426,7 +391,7 @@ func TestWrapSharesIndividually(t *testing.T) {
 				testKMSClients: &cloudkms.ClientFactory{
 					CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 				},
-				testSecureSessionClient: &fakeSecureSessionClient{},
+				testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 			}
 
 			ki := []*configpb.KekInfo{
@@ -645,7 +610,7 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	wrapOpts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
@@ -779,7 +744,7 @@ func TestWrapSharesError(t *testing.T) {
 		kekInfos          []*configpb.KekInfo
 		ckReturn          *kmsrpb.CryptoKey
 		ckErrReturn       error
-		fakeSSClient      *fakeSecureSessionClient
+		fakeSSClient      *testutil.FakeSecureSessionClient
 		encryptErrReturn  error
 		expectedErrSubstr string
 	}{
@@ -828,7 +793,7 @@ func TestWrapSharesError(t *testing.T) {
 			}},
 			ckReturn:          testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE, ""),
 			ckErrReturn:       nil,
-			fakeSSClient:      &fakeSecureSessionClient{},
+			fakeSSClient:      &testutil.FakeSecureSessionClient{},
 			encryptErrReturn:  nil,
 			expectedErrSubstr: "number of shares",
 		},
@@ -840,7 +805,7 @@ func TestWrapSharesError(t *testing.T) {
 			}},
 			ckReturn:          testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE, ""),
 			ckErrReturn:       nil,
-			fakeSSClient:      &fakeSecureSessionClient{},
+			fakeSSClient:      &testutil.FakeSecureSessionClient{},
 			encryptErrReturn:  nil,
 			expectedErrSubstr: "retrieving KEK Metadata",
 		},
@@ -851,8 +816,8 @@ func TestWrapSharesError(t *testing.T) {
 				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.ExternalKEK.URI()},
 			}},
 			ckReturn: testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_EXTERNAL, testutil.ExternalKEK.Name),
-			fakeSSClient: &fakeSecureSessionClient{
-				wrapErr: errors.New("this is an error from ConfidentialWrap"),
+			fakeSSClient: &testutil.FakeSecureSessionClient{
+				WrapErr: errors.New("this is an error from ConfidentialWrap"),
 			},
 			expectedErrSubstr: "wrapping with secure session",
 		},
@@ -949,7 +914,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	for _, testCase := range testCases {
@@ -1115,7 +1080,7 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
 
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	opts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
@@ -1149,7 +1114,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 		name              string
 		wrappedShares     []*configpb.WrappedShare
 		kekInfos          []*configpb.KekInfo
-		fakeSSClient      *fakeSecureSessionClient
+		fakeSSClient      *testutil.FakeSecureSessionClient
 		decryptErrReturn  error
 		expectedErrSubstr string
 	}{
@@ -1159,7 +1124,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
 				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.SoftwareKEK.URI()},
 			}},
-			fakeSSClient:      &fakeSecureSessionClient{},
+			fakeSSClient:      &testutil.FakeSecureSessionClient{},
 			decryptErrReturn:  nil,
 			expectedErrSubstr: "number of shares",
 		},
@@ -1169,7 +1134,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
 				KekType: &configpb.KekInfo_KekUri{KekUri: "I am an invalid URI!"},
 			}},
-			fakeSSClient:     &fakeSecureSessionClient{},
+			fakeSSClient:     &testutil.FakeSecureSessionClient{},
 			decryptErrReturn: nil,
 		},
 		{
@@ -1181,7 +1146,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			kekInfos: []*configpb.KekInfo{&configpb.KekInfo{
 				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.SoftwareKEK.URI()},
 			}},
-			fakeSSClient:     &fakeSecureSessionClient{},
+			fakeSSClient:     &testutil.FakeSecureSessionClient{},
 			decryptErrReturn: nil,
 		},
 		{
@@ -1191,8 +1156,8 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 				KekType: &configpb.KekInfo_KekUri{KekUri: testutil.ExternalKEK.URI()},
 			}},
 			decryptErrReturn: nil,
-			fakeSSClient: &fakeSecureSessionClient{
-				unwrapErr: errors.New("this is an error from ConfidentialUnwrap"),
+			fakeSSClient: &testutil.FakeSecureSessionClient{
+				UnwrapErr: errors.New("this is an error from ConfidentialUnwrap"),
 			},
 		},
 		{
@@ -1257,7 +1222,7 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	opts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
@@ -1320,7 +1285,7 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	for _, tc := range testCases {
@@ -1381,7 +1346,7 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": &testutil.FakeKeyManagementClient{}},
 		},
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	plaintextBuf := bytes.NewReader(plaintext)
@@ -1441,7 +1406,7 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
 		},
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	for _, tc := range testCases {
@@ -1510,7 +1475,7 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
 		},
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	plaintextBuf := bytes.NewReader(plaintext)
@@ -1555,7 +1520,7 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 		testKMSClients: &cloudkms.ClientFactory{
 			CredsMap: map[string]cloudkms.Client{"": fakeKMSClient},
 		},
-		testSecureSessionClient: &fakeSecureSessionClient{},
+		testSecureSessionClient: &testutil.FakeSecureSessionClient{},
 	}
 
 	blobIDs := []string{}

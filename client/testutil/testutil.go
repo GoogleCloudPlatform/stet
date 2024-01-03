@@ -17,13 +17,16 @@ package testutil
 
 import (
 	"context"
+	"errors"
 	"hash/crc32"
 	"os"
 	"testing"
 
 	"cloud.google.com/go/kms/apiv1"
+	ekmpb "cloud.google.com/go/kms/apiv1/kmspb"
 	kmsrpb "cloud.google.com/go/kms/apiv1/kmspb"
 	kmsspb "cloud.google.com/go/kms/apiv1/kmspb"
+	"github.com/GoogleCloudPlatform/stet/client/securesession"
 	"github.com/googleapis/gax-go/v2"
 	wrapperspb "google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -34,6 +37,13 @@ var (
 
 	// ExternalEKMURI is the external URI corresponding to ExternalKEK.
 	ExternalEKMURI = "https://my-kms.io/external-key"
+
+	// ExternalVPCBackend represents the ekmConnection for an External_VPC KEK.
+	ExternalVPCBackend = "projects/test/locations/test/ekmConnection/testConn"
+	// ExternalVPCHostname represents the external URI hostname for an External_VPC KEK.
+	ExternalVPCHostname = "testvpchost"
+	// ExternalVPCKeyPath represents the keyPath for an External_VPC KEK.
+	ExternalVPCKeyPath = "api/v1/cckm/ekm/endpoints/testpath"
 )
 
 func newKEK(nameSuffix string, protectionLevel kmsrpb.ProtectionLevel) *KEK {
@@ -61,12 +71,15 @@ var (
 	HSMKEK = newKEK("testHsm", kmsrpb.ProtectionLevel_HSM)
 	// ExternalKEK represents a test KEK with the External protection level.
 	ExternalKEK = newKEK("testExternal", kmsrpb.ProtectionLevel_EXTERNAL)
+	// VPCKEK represents a test KEK with the External_VPC protection level.
+	VPCKEK = newKEK("testExternalVPC", kmsrpb.ProtectionLevel_EXTERNAL_VPC)
 )
 
 var defaultKEKs map[kmsrpb.ProtectionLevel]*KEK = map[kmsrpb.ProtectionLevel]*KEK{
-	kmsrpb.ProtectionLevel_HSM:      SoftwareKEK,
-	kmsrpb.ProtectionLevel_SOFTWARE: HSMKEK,
-	kmsrpb.ProtectionLevel_EXTERNAL: ExternalKEK,
+	kmsrpb.ProtectionLevel_HSM:          SoftwareKEK,
+	kmsrpb.ProtectionLevel_SOFTWARE:     HSMKEK,
+	kmsrpb.ProtectionLevel_EXTERNAL:     ExternalKEK,
+	kmsrpb.ProtectionLevel_EXTERNAL_VPC: VPCKEK,
 }
 
 // CreateTempTokenFile creates a temp directory/file as a stand-in for the attestation token.
@@ -108,6 +121,11 @@ func CreateEnabledCryptoKey(protectionLevel kmsrpb.ProtectionLevel, name string)
 	if protectionLevel == kmsrpb.ProtectionLevel_EXTERNAL {
 		ck.Primary.ExternalProtectionLevelOptions = &kmsrpb.ExternalProtectionLevelOptions{
 			ExternalKeyUri: ExternalEKMURI,
+		}
+	} else if protectionLevel == kmsrpb.ProtectionLevel_EXTERNAL_VPC {
+		ck.CryptoKeyBackend = ExternalVPCBackend
+		ck.Primary.ExternalProtectionLevelOptions = &kmsrpb.ExternalProtectionLevelOptions{
+			EkmConnectionKeyPath: ExternalVPCKeyPath,
 		}
 	}
 
@@ -214,3 +232,63 @@ func (f *FakeKeyManagementClient) Decrypt(ctx context.Context, req *kmsspb.Decry
 func (f *FakeKeyManagementClient) Close() error {
 	return nil
 }
+
+// FakeSecureSessionClient is a test version of a secure session client, used to communicate with
+// external EKM.
+type FakeSecureSessionClient struct {
+	securesession.SecureSessionClient
+
+	WrapErr       error
+	UnwrapErr     error
+	EndSessionErr error
+}
+
+// ConfidentialWrap simulates wrapping a share by appending a single byte ('E') to the end of the
+// plaintext to indicate external protection level.
+func (f *FakeSecureSessionClient) ConfidentialWrap(_ context.Context, _, _ string, plaintext []byte) ([]byte, error) {
+	// Return configured error if one was set
+	if f.WrapErr != nil {
+		return nil, f.WrapErr
+	}
+
+	return append(plaintext, byte('E')), nil
+}
+
+// ConfidentialUnwrap removes the last byte of the wrapped share (mirroring ConfidentalWrap above).
+func (f *FakeSecureSessionClient) ConfidentialUnwrap(_ context.Context, _, _ string, wrappedBlob []byte) ([]byte, error) {
+	// Return configured error if one was set
+	if f.UnwrapErr != nil {
+		return nil, f.UnwrapErr
+	}
+
+	return wrappedBlob[:len(wrappedBlob)-1], nil
+}
+
+// EndSession is necessary to implement the SecureSessionClient interface.
+func (f *FakeSecureSessionClient) EndSession(ctx context.Context) error {
+	// Return configured error if one was set
+	if f.EndSessionErr != nil {
+		return f.EndSessionErr
+	}
+
+	return nil
+}
+
+// FakeCloudEKMClient is a fake implementation of the GCP EKM client.
+type FakeCloudEKMClient struct {
+	kms.EkmClient
+
+	GetEkmConnectionFunc func(context.Context, *ekmpb.GetEkmConnectionRequest, ...gax.CallOption) (*ekmpb.EkmConnection, error)
+}
+
+// GetEkmConnection calls GetEkmConnectionFunc if applicable. Otherwise returns error.
+func (f *FakeCloudEKMClient) GetEkmConnection(ctx context.Context, req *ekmpb.GetEkmConnectionRequest, opts ...gax.CallOption) (*ekmpb.EkmConnection, error) {
+	if f.GetEkmConnectionFunc != nil {
+		return f.GetEkmConnectionFunc(ctx, req, opts...)
+	}
+
+	return nil, errors.New("unimplemented fake")
+}
+
+// Close is a no-op. Needed to implement the EKM Client interface.
+func (f *FakeCloudEKMClient) Close() error { return nil }

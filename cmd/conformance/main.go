@@ -19,6 +19,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/base64"
 	"errors"
 	"fmt"
@@ -32,6 +33,7 @@ import (
 	"github.com/GoogleCloudPlatform/stet/client/ekmclient"
 	"github.com/GoogleCloudPlatform/stet/client/jwt"
 	"github.com/GoogleCloudPlatform/stet/client/securesession"
+	"github.com/GoogleCloudPlatform/stet/client/vpc"
 	"github.com/GoogleCloudPlatform/stet/constants"
 	aepb "github.com/GoogleCloudPlatform/stet/proto/attestation_evidence_go_proto"
 	cwpb "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
@@ -53,9 +55,15 @@ const (
 var (
 	unprotectedKeyResourceName = flag.String("unprotected-resource-name", defaultKeyResourceName, "CloudKMS resource name of an external key not protected by CC attestation")
 	protectedKeyResourceName   = flag.String("protected-resource-name", defaultProtectedKeyResourceName, "CloudKMS resource name of an external key protected by CC attestation")
-	unprotectedKeyURI          string
-	protectedKeyURI            string
 )
+
+type externalKeyInfo struct {
+	uri   string
+	certs *x509.CertPool
+}
+
+var unprotectedKey *externalKeyInfo
+var protectedKey *externalKeyInfo
 
 // recordBufferSize is the number of bytes allocated to buffers when reading
 // records from the TLS session. 16KB is the maximum TLS record size, so this
@@ -99,7 +107,8 @@ func createAuthToken(ctx context.Context, keyURL string) (string, error) {
 
 // Initializes a new EKM client against the given key URL with the given
 // cipher suites, also kicking off the internal TLS handshake.
-func newEKMClientWithSuites(ctx context.Context, keyURL string, cipherSuites []uint16) ekmClient {
+func newEKMClientWithSuites(ctx context.Context, key *externalKeyInfo, cipherSuites []uint16) ekmClient {
+	keyURL := key.uri
 	c := ekmClient{
 		client: ekmclient.NewConfidentialEKMClient(keyURL),
 	}
@@ -117,6 +126,7 @@ func newEKMClientWithSuites(ctx context.Context, keyURL string, cipherSuites []u
 		CipherSuites:       cipherSuites,
 		MinVersion:         tls.VersionTLS12,
 		MaxVersion:         tls.VersionTLS13,
+		RootCAs:            key.certs,
 		InsecureSkipVerify: true,
 	}
 
@@ -131,8 +141,8 @@ func newEKMClientWithSuites(ctx context.Context, keyURL string, cipherSuites []u
 	return c
 }
 
-func newEKMClient(ctx context.Context, keyURL string) ekmClient {
-	return newEKMClientWithSuites(ctx, keyURL, constants.AllowableCipherSuites)
+func newEKMClient(ctx context.Context, key *externalKeyInfo) ekmClient {
+	return newEKMClientWithSuites(ctx, key, constants.AllowableCipherSuites)
 }
 
 // Returns an empty byte array.
@@ -185,9 +195,9 @@ type beginSessionTest struct {
 func runBeginSessionTestCase(ctx context.Context, t beginSessionTest) error {
 	var c ekmClient
 	if t.altCipherSuites != nil {
-		c = newEKMClientWithSuites(ctx, unprotectedKeyURI, t.altCipherSuites)
+		c = newEKMClientWithSuites(ctx, unprotectedKey, t.altCipherSuites)
 	} else {
-		c = newEKMClient(ctx, unprotectedKeyURI)
+		c = newEKMClient(ctx, unprotectedKey)
 	}
 
 	req := &sspb.BeginSessionRequest{
@@ -243,7 +253,7 @@ type handshakeTest struct {
 }
 
 func runHandshakeTestCase(ctx context.Context, t handshakeTest) error {
-	c := newEKMClient(ctx, unprotectedKeyURI)
+	c := newEKMClient(ctx, unprotectedKey)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -314,7 +324,7 @@ type negotiateAttestationTest struct {
 }
 
 func runNegotiateAttestationTestCase(ctx context.Context, t negotiateAttestationTest) (*aepb.AttestationEvidenceTypeList, error) {
-	c := newEKMClient(ctx, unprotectedKeyURI)
+	c := newEKMClient(ctx, unprotectedKey)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -434,16 +444,16 @@ func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
 	// EstablishSecureSession() method from the `client` package (since it already has the complete
 	// logic for generating attestations, etc).
 	if t.fullAttestation {
-		token, err := createAuthToken(ctx, unprotectedKeyURI)
+		token, err := createAuthToken(ctx, unprotectedKey.uri)
 		if err != nil {
 			return fmt.Errorf("Error generating JWT: %v", err)
 		}
 
-		_, err = securesession.EstablishSecureSession(ctx, unprotectedKeyURI, token, securesession.SkipTLSVerify(true))
+		_, err = securesession.EstablishSecureSession(ctx, unprotectedKey.uri, token, securesession.HTTPCertPool(unprotectedKey.certs), securesession.SkipTLSVerify(true))
 		return err
 	}
 
-	c := newEKMClient(ctx, unprotectedKeyURI)
+	c := newEKMClient(ctx, unprotectedKey)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -574,8 +584,8 @@ func runFinalizeTestCase(ctx context.Context, t finalizeTest) error {
 }
 
 // Establishes a secure session, returning the ekmClient and session context.
-func establishSecureSessionWithNullAttestation(ctx context.Context, uri string) (*ekmClient, []byte, error) {
-	c := newEKMClient(ctx, uri)
+func establishSecureSessionWithNullAttestation(ctx context.Context, key *externalKeyInfo) (*ekmClient, []byte, error) {
+	c := newEKMClient(ctx, key)
 
 	req := &sspb.BeginSessionRequest{
 		TlsRecords: c.shim.DrainSendBuf(),
@@ -695,7 +705,7 @@ type endSessionTest struct {
 }
 
 func runEndSessionTestCase(ctx context.Context, t endSessionTest) error {
-	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx, unprotectedKeyURI)
+	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx, unprotectedKey)
 	if err != nil {
 		return err
 	}
@@ -734,7 +744,7 @@ func runEndSessionTestCase(ctx context.Context, t endSessionTest) error {
 type confidentialWrapUnwrapTest struct {
 	testName         string
 	expectErr        bool
-	keyURI           string
+	keyInfo          *externalKeyInfo
 	extraCalls       int
 	closeSession     bool
 	mutateTLSRecords func(r []byte) []byte
@@ -743,7 +753,7 @@ type confidentialWrapUnwrapTest struct {
 }
 
 func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTest) error {
-	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx, t.keyURI)
+	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx, t.keyInfo)
 
 	if err != nil {
 		return err
@@ -769,7 +779,7 @@ func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTe
 			sessionContext = t.mutateSessionKey(sessionContext)
 		}
 
-		keyPath := (t.keyURI)[strings.LastIndex(t.keyURI, "/")+1:]
+		keyPath := (t.keyInfo.uri)[strings.LastIndex(t.keyInfo.uri, "/")+1:]
 
 		// Create a WrapRequest, marshal, then session-encrypt it.
 		wrapReq := &cwpb.WrapRequest{
@@ -825,7 +835,7 @@ func runConfidentialWrapTestCase(ctx context.Context, t confidentialWrapUnwrapTe
 }
 
 func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrapTest) error {
-	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx, t.keyURI)
+	c, sessionContext, err := establishSecureSessionWithNullAttestation(ctx, t.keyInfo)
 
 	if err != nil {
 		return err
@@ -849,7 +859,7 @@ func runConfidentialUnwrapTestCase(ctx context.Context, t confidentialWrapUnwrap
 	for i := 0; i <= t.extraCalls; i++ {
 		plaintext := []byte("This is plaintext to encrypt.")
 
-		keyPath := (t.keyURI)[strings.LastIndex(t.keyURI, "/")+1:]
+		keyPath := (t.keyInfo.uri)[strings.LastIndex(t.keyInfo.uri, "/")+1:]
 
 		// Send a ConfidentialWrapRequest so we have a wrapped blob to decrypt.
 		wrapReq := &cwpb.WrapRequest{
@@ -1351,53 +1361,55 @@ func runConfidentialWrapTests(ctx context.Context) {
 		{
 			testName:  "Establish secure session then valid ConfidentialWrap",
 			expectErr: false,
-			keyURI:    unprotectedKeyURI,
+			keyInfo:   unprotectedKey,
 		},
 		{
 			testName:   "Establish secure session then valid Confidential Wrap twice",
 			expectErr:  false,
-			keyURI:     unprotectedKeyURI,
+			keyInfo:    unprotectedKey,
 			extraCalls: 1,
 		},
 		{
 			testName:  "ConfidentialWrap with invalid key path",
 			expectErr: true,
-			keyURI:    "fake.domain/Surely the EKM would not have a valid key with this path...",
+			keyInfo: &externalKeyInfo{
+				uri: "fake.domain/Surely the EKM would not have a valid key with this path...",
+			},
 		},
 		{
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
-			keyURI:           unprotectedKeyURI,
+			keyInfo:          unprotectedKey,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
-			keyURI:           unprotectedKeyURI,
+			keyInfo:          unprotectedKey,
 		},
 		{
 			testName:     "Close session before wrap",
 			expectErr:    true,
 			closeSession: true,
-			keyURI:       unprotectedKeyURI,
+			keyInfo:      unprotectedKey,
 		},
 		{
 			testName:  "Wrap using protected key without CC attestation negotiated",
 			expectErr: true,
-			keyURI:    protectedKeyURI,
+			keyInfo:   protectedKey,
 		},
 		{
 			testName:  "JWT has invalid signature",
 			expectErr: true,
 			mutateJWT: invalidateJwtSignature,
-			keyURI:    unprotectedKeyURI,
+			keyInfo:   unprotectedKey,
 		},
 		{
 			testName:  "JWT has a bad audience",
 			expectErr: true,
 			mutateJWT: badAudience,
-			keyURI:    unprotectedKeyURI,
+			keyInfo:   unprotectedKey,
 		},
 	}
 
@@ -1417,53 +1429,55 @@ func runConfidentialUnwrapTests(ctx context.Context) {
 		{
 			testName:  "Establish secure session then valid ConfidentialUnwrap",
 			expectErr: false,
-			keyURI:    unprotectedKeyURI,
+			keyInfo:   unprotectedKey,
 		},
 		{
 			testName:   "Establish secure session then valid Confidential Unwrap twice",
 			expectErr:  false,
-			keyURI:     unprotectedKeyURI,
+			keyInfo:    unprotectedKey,
 			extraCalls: 1,
 		},
 		{
 			testName:  "ConfidentialWrap with invalid key path",
 			expectErr: true,
-			keyURI:    "fake.domain/Surely the EKM would not have a valid key with this path...",
+			keyInfo: &externalKeyInfo{
+				uri: "fake.domain/Surely the EKM would not have a valid key with this path...",
+			},
 		},
 		{
 			testName:         "No TLS records in request",
 			expectErr:        true,
 			mutateTLSRecords: emptyFn,
-			keyURI:           unprotectedKeyURI,
+			keyInfo:          unprotectedKey,
 		},
 		{
 			testName:         "Invalid session key",
 			expectErr:        true,
 			mutateSessionKey: emptyFn,
-			keyURI:           unprotectedKeyURI,
+			keyInfo:          unprotectedKey,
 		},
 		{
 			testName:     "Close session before unwrap",
 			expectErr:    true,
 			closeSession: true,
-			keyURI:       unprotectedKeyURI,
+			keyInfo:      unprotectedKey,
 		},
 		{
 			testName:  "Unwrap using protected key without CC attestation negotiated",
 			expectErr: true,
-			keyURI:    protectedKeyURI,
+			keyInfo:   protectedKey,
 		},
 		{
 			testName:  "JWT has invalid signature",
 			expectErr: true,
 			mutateJWT: invalidateJwtSignature,
-			keyURI:    unprotectedKeyURI,
+			keyInfo:   unprotectedKey,
 		},
 		{
 			testName:  "JWT has a bad audience",
 			expectErr: true,
 			mutateJWT: badAudience,
-			keyURI:    unprotectedKeyURI,
+			keyInfo:   unprotectedKey,
 		},
 	}
 
@@ -1478,51 +1492,71 @@ func runConfidentialUnwrapTests(ctx context.Context) {
 	}
 }
 
-func getKeyURI(ctx context.Context, resourceName string) (string, error) {
+func getKeyInfo(ctx context.Context, resourceName string) (*externalKeyInfo, error) {
 	client, err := kms.NewKeyManagementClient(ctx)
 	if err != nil {
-		return "", fmt.Errorf("error creating Cloud KMS client: %v", err)
+		return nil, fmt.Errorf("error creating Cloud KMS client: %v", err)
 	}
 	defer client.Close()
 
 	cryptoKey, err := client.GetCryptoKey(ctx, &spb.GetCryptoKeyRequest{Name: resourceName})
 	if err != nil {
-		return "", fmt.Errorf("error getting CryptoKey for %v: %v", resourceName, err)
+		return nil, fmt.Errorf("error getting CryptoKey for %v: %v", resourceName, err)
 	}
 
 	cryptoKeyVer := cryptoKey.GetPrimary()
 	if cryptoKeyVer.GetState() != rpb.CryptoKeyVersion_ENABLED {
-		return "", fmt.Errorf("key %v is not enabled", resourceName)
+		return nil, fmt.Errorf("key %v is not enabled", resourceName)
 	}
 
-	if cryptoKeyVer.ProtectionLevel != rpb.ProtectionLevel_EXTERNAL {
-		return "", fmt.Errorf("key %v does not have EXTERNAL protection level", resourceName)
+	if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_EXTERNAL {
+		if cryptoKeyVer.ExternalProtectionLevelOptions == nil {
+			return nil, fmt.Errorf("key %vs does not have external protection level options", resourceName)
+		}
+
+		return &externalKeyInfo{
+			uri: cryptoKeyVer.GetExternalProtectionLevelOptions().GetExternalKeyUri(),
+		}, nil
+
+	} else if cryptoKeyVer.ProtectionLevel == rpb.ProtectionLevel_EXTERNAL_VPC {
+		// Create an EKM Client to retrieve EkmConnection.
+		cloudEKMClient, err := kms.NewEkmClient(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("error creating KMS EKM Client: %w", err)
+		}
+		defer cloudEKMClient.Close()
+
+		uri, certs, err := vpc.GetURIAndCerts(ctx, cloudEKMClient, cryptoKey)
+		if err != nil {
+			return nil, fmt.Errorf("error getting EXTERNAL_VPC uri and certs: %v", err)
+		}
+
+		return &externalKeyInfo{uri, certs}, nil
 	}
 
-	if cryptoKeyVer.ExternalProtectionLevelOptions == nil {
-		return "", fmt.Errorf("key %vs does not have external protection level options", resourceName)
-	}
-
-	return cryptoKeyVer.GetExternalProtectionLevelOptions().GetExternalKeyUri(), nil
+	return nil, fmt.Errorf("key %v does not have EXTERNAL or EXTERNAL_VPC protection level", resourceName)
 }
 
-func configureKeyURIs(ctx context.Context) error {
+func configureExternalKeyInfo(ctx context.Context) error {
 	if *unprotectedKeyResourceName == defaultKeyResourceName {
-		unprotectedKeyURI = fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath1)
+		unprotectedKey = &externalKeyInfo{
+			uri: fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath1),
+		}
 	} else {
-		// Get unprotected keyURI.
 		var err error
-		unprotectedKeyURI, err = getKeyURI(ctx, *unprotectedKeyResourceName)
+		unprotectedKey, err = getKeyInfo(ctx, *unprotectedKeyResourceName)
 		if err != nil {
 			return fmt.Errorf("Error getting unprotected KeyURI: %v", err)
 		}
 	}
 
 	if *protectedKeyResourceName == defaultProtectedKeyResourceName {
-		protectedKeyURI = fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath2)
+		protectedKey = &externalKeyInfo{
+			uri: fmt.Sprintf("http://localhost:%d/v0/%v", constants.HTTPPort, server.KeyPath2),
+		}
 	} else {
 		var err error
-		protectedKeyURI, err = getKeyURI(ctx, *protectedKeyResourceName)
+		protectedKey, err = getKeyInfo(ctx, *protectedKeyResourceName)
 		if err != nil {
 			return fmt.Errorf("Error getting protected KeyURI: %v", err)
 		}
@@ -1535,8 +1569,8 @@ func main() {
 	flag.Parse()
 	ctx := context.Background()
 
-	if err := configureKeyURIs(ctx); err != nil {
-		glog.Fatalf("Failed to configre key URIs: %v", err)
+	if err := configureExternalKeyInfo(ctx); err != nil {
+		glog.Fatalf("Failed to configure key URIs: %v", err)
 	}
 
 	// Define and run BeginSession tests.

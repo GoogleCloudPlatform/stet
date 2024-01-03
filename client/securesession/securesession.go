@@ -203,6 +203,7 @@ func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool,
 		CipherSuites: constants.AllowableCipherSuites,
 		MinVersion:   tls.VersionTLS12,
 		MaxVersion:   tls.VersionTLS13,
+		RootCAs:      httpCertPool,
 	}
 
 	// If in testing mode, skip verification. Otherwise, set ServerName based on key URI.
