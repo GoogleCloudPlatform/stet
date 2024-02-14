@@ -185,3 +185,27 @@ func TestGetURIAndCertsErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestExternalURI(t *testing.T) {
+	tests := []struct {
+		hostname string
+		keyPath  string
+	}{
+		{
+			hostname: testHostname,
+			keyPath:  testKeyPath,
+		},
+		{
+			// Make sure we correctly handle cases where the keypath has a leading slash.
+			hostname: testHostname,
+			keyPath:  "/" + testKeyPath,
+		},
+	}
+
+	for _, tc := range tests {
+		got := externalURI(tc.hostname, tc.keyPath)
+		if got != testVPCURI {
+			t.Errorf("externalURI(%v, %v) = %v, want: %v", tc.hostname, tc.keyPath, got, testVPCURI)
+		}
+	}
+}

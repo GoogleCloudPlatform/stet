@@ -20,6 +20,7 @@ import (
 	"crypto/x509"
 	"errors"
 	"fmt"
+	"net/url"
 
 	ekmpb "cloud.google.com/go/kms/apiv1/kmspb"
 	rpb "cloud.google.com/go/kms/apiv1/kmspb"
@@ -45,6 +46,16 @@ func toCertPool(kmsCerts []*ekmpb.Certificate) (*x509.CertPool, error) {
 	}
 
 	return certPool, nil
+}
+
+func externalURI(hostname string, keyPath string) string {
+	u := url.URL{
+		Scheme: "https",
+		Host:   hostname,
+		Path:   keyPath,
+	}
+
+	return u.String()
 }
 
 // GetURIAndCerts uses the provided client to get the EKM URI and service resolver certificates
@@ -80,5 +91,5 @@ func GetURIAndCerts(ctx context.Context, client CloudEKMClient, cryptoKey *rpb.C
 	}
 	keyPath := cryptoKeyVer.GetExternalProtectionLevelOptions().GetEkmConnectionKeyPath()
 
-	return fmt.Sprintf("https://%s/%s", sr.Hostname, keyPath), leafCerts, nil
+	return externalURI(sr.GetHostname(), keyPath), leafCerts, nil
 }
