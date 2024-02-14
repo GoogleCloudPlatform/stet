@@ -52,7 +52,7 @@ func createTestKMSClient(t *testing.T, cType clientType) *testutil.FakeKeyManage
 
 			return &rpb.CryptoKey{
 				Primary: &rpb.CryptoKeyVersion{
-					Name:            req.GetName(),
+					Name:            req.GetName() + testutil.CryptoKeyVerSuffix,
 					State:           rpb.CryptoKeyVersion_ENABLED,
 					ProtectionLevel: rpb.ProtectionLevel_SOFTWARE,
 				}}, nil

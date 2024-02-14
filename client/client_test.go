@@ -201,6 +201,7 @@ func TestGetKekCryptoKeyErrors(t *testing.T) {
 func TestExternalKEKMetadata(t *testing.T) {
 	cryptoKey := &kmsrpb.CryptoKey{
 		Primary: &kmsrpb.CryptoKeyVersion{
+			Name:            testutil.ExternalKEK.ResourceName(),
 			State:           kmsrpb.CryptoKeyVersion_ENABLED,
 			ProtectionLevel: kmsrpb.ProtectionLevel_EXTERNAL,
 			ExternalProtectionLevelOptions: &kmsrpb.ExternalProtectionLevelOptions{
@@ -209,17 +210,13 @@ func TestExternalKEKMetadata(t *testing.T) {
 		},
 	}
 
-	kekInfo := &configpb.KekInfo{
-		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.ExternalKEK.URI()},
-	}
-
 	expectedMD := &kekMetadata{
 		protectionLevel: kmsrpb.ProtectionLevel_EXTERNAL,
 		uri:             testutil.ExternalEKMURI,
-		resourceName:    testutil.ExternalKEK.Name,
+		resourceName:    testutil.ExternalKEK.ResourceName(),
 	}
 
-	md, err := externalKEKMetadata(cryptoKey, kekInfo)
+	md, err := externalKEKMetadata(cryptoKey)
 	if err != nil {
 		t.Fatalf("getKekMetadata returned error: %v", err)
 	}
@@ -232,16 +229,13 @@ func TestExternalKEKMetadata(t *testing.T) {
 func TestExternalKEKMetadataError(t *testing.T) {
 	cryptoKey := &kmsrpb.CryptoKey{
 		Primary: &kmsrpb.CryptoKeyVersion{
+			Name:            testutil.ExternalKEK.ResourceName(),
 			State:           kmsrpb.CryptoKeyVersion_ENABLED,
 			ProtectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
 		},
 	}
 
-	kekInfo := &configpb.KekInfo{
-		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.ExternalKEK.URI()},
-	}
-
-	_, err := externalKEKMetadata(cryptoKey, kekInfo)
+	_, err := externalKEKMetadata(cryptoKey)
 	if err == nil {
 		t.Errorf("getKekMetadata returned successfully, expected error")
 	}
@@ -676,7 +670,7 @@ func TestWrapSharesWithConfidentialSpace(t *testing.T) {
 			GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 				return &kmsrpb.CryptoKey{
 					Primary: &kmsrpb.CryptoKeyVersion{
-						Name:            req.GetName(),
+						Name:            req.GetName() + testutil.CryptoKeyVerSuffix,
 						State:           kmsrpb.CryptoKeyVersion_ENABLED,
 						ProtectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
 					},
@@ -766,7 +760,7 @@ func TestWrapSharesError(t *testing.T) {
 			}},
 			ckReturn: &kmsrpb.CryptoKey{
 				Primary: &kmsrpb.CryptoKeyVersion{
-					Name:            testutil.SoftwareKEK.Name,
+					Name:            testutil.SoftwareKEK.ResourceName(),
 					State:           kmsrpb.CryptoKeyVersion_DISABLED,
 					ProtectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
 				},
@@ -983,7 +977,7 @@ func TestUnwrapAndValidateSharesWithConfidentialSpace(t *testing.T) {
 			GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 				return &kmsrpb.CryptoKey{
 					Primary: &kmsrpb.CryptoKeyVersion{
-						Name:            req.GetName(),
+						Name:            req.GetName() + testutil.CryptoKeyVerSuffix,
 						State:           kmsrpb.CryptoKeyVersion_ENABLED,
 						ProtectionLevel: kmsrpb.ProtectionLevel_SOFTWARE,
 					},

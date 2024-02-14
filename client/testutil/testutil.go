@@ -32,8 +32,10 @@ import (
 )
 
 var (
-	gcpKMSPrefix       = "gcp-kms://"
-	cryptoKeyVerSuffix = "/cryptoKeyVersions/test"
+	gcpKMSPrefix = "gcp-kms://"
+
+	// CryptoKeyVerSuffix is the suffix for the cryptoKeyVersion in a GCP key identifier.
+	CryptoKeyVerSuffix = "/cryptoKeyVersions/test"
 
 	// ExternalEKMURI is the external URI corresponding to ExternalKEK.
 	ExternalEKMURI = "https://my-kms.io/external-key"
@@ -55,6 +57,7 @@ func newKEK(nameSuffix string, protectionLevel kmsrpb.ProtectionLevel) *KEK {
 
 // KEK contains basic information about test KEKs.
 type KEK struct {
+	// Name is a fake CryptoKey name, of the format "projects/*/locations/*/keyRings/*/cryptoKeys/*".
 	Name            string
 	ProtectionLevel kmsrpb.ProtectionLevel
 }
@@ -62,6 +65,11 @@ type KEK struct {
 // URI returns the KEK's CloudKMS URI by appending the GCP KMS prefix to the key name.
 func (k *KEK) URI() string {
 	return gcpKMSPrefix + k.Name
+}
+
+// ResourceName returns the relative resource name of the KEK, which is the name with a cryptoKeyVersion appended.
+func (k *KEK) ResourceName() string {
+	return k.Name + CryptoKeyVerSuffix
 }
 
 var (
@@ -111,7 +119,7 @@ func CreateEnabledCryptoKey(protectionLevel kmsrpb.ProtectionLevel, name string)
 	ck := &kmsrpb.CryptoKey{
 		Name: name,
 		Primary: &kmsrpb.CryptoKeyVersion{
-			Name:            name + cryptoKeyVerSuffix,
+			Name:            name + CryptoKeyVerSuffix,
 			State:           kmsrpb.CryptoKeyVersion_ENABLED,
 			ProtectionLevel: protectionLevel,
 		},

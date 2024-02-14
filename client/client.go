@@ -223,24 +223,23 @@ func getKekCryptoKey(ctx context.Context, kmsClient cloudkms.Client, kekInfo *co
 	return cryptoKey, nil
 }
 
-func externalKEKMetadata(cryptoKey *rpb.CryptoKey, kek *configpb.KekInfo) (*kekMetadata, error) {
+func externalKEKMetadata(cryptoKey *rpb.CryptoKey) (*kekMetadata, error) {
 	cryptoKeyVer := cryptoKey.GetPrimary()
 
 	if cryptoKeyVer.ExternalProtectionLevelOptions == nil {
-		return nil, fmt.Errorf("CryptoKeyVersion for KEK %s does not have external protection level options despite being EXTERNAL protection level", kek.GetKekUri())
+		return nil, fmt.Errorf("CryptoKeyVersion %s does not have external protection level options despite being EXTERNAL protection level", cryptoKeyVer.GetName())
 	}
 
 	kmd := &kekMetadata{
 		protectionLevel: rpb.ProtectionLevel_EXTERNAL,
 		uri:             cryptoKeyVer.GetExternalProtectionLevelOptions().GetExternalKeyUri(),
-		resourceName:    strings.TrimPrefix(kek.GetKekUri(), gcpKeyPrefix),
+		resourceName:    cryptoKeyVer.GetName(),
 	}
 
 	return kmd, nil
-
 }
 
-func (c *StetClient) getExternalVPCKeyInfo(ctx context.Context, kek *configpb.KekInfo, cryptoKey *rpb.CryptoKey, credentials string) (*kekMetadata, *x509.CertPool, error) {
+func (c *StetClient) getExternalVPCKeyInfo(ctx context.Context, cryptoKey *rpb.CryptoKey, credentials string) (*kekMetadata, *x509.CertPool, error) {
 	ekmClient, err := c.newCloudEKMClient(ctx, credentials)
 	if err != nil {
 		return nil, nil, fmt.Errorf("error creating KMS EKM Client: %w", err)
@@ -249,13 +248,13 @@ func (c *StetClient) getExternalVPCKeyInfo(ctx context.Context, kek *configpb.Ke
 
 	ekmURI, ekmCerts, err := vpc.GetURIAndCerts(ctx, ekmClient, cryptoKey)
 	if err != nil {
-		return nil, nil, fmt.Errorf("Error getting uri and certificates for KEK %v: %v", kek.GetKekUri(), err)
+		return nil, nil, fmt.Errorf("Error getting uri and certificates for KEK %v: %v", cryptoKey.GetName(), err)
 	}
 
 	return &kekMetadata{
 		protectionLevel: rpb.ProtectionLevel_EXTERNAL_VPC,
 		uri:             ekmURI,
-		resourceName:    strings.TrimPrefix(kek.GetKekUri(), gcpKeyPrefix),
+		resourceName:    cryptoKey.GetPrimary().GetName(),
 	}, ekmCerts, nil
 }
 
@@ -335,7 +334,7 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, o
 
 				uri = kek.GetKekUri()
 			case rpb.ProtectionLevel_EXTERNAL:
-				kmd, err := externalKEKMetadata(cryptoKey, kek)
+				kmd, err := externalKEKMetadata(cryptoKey)
 				if err != nil {
 					return nil, nil, fmt.Errorf("error creating KEK Metadata: %v", err)
 				}
@@ -349,7 +348,7 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, o
 				wrapped.Share = ekmWrappedShare
 				uri = kmd.uri
 			case rpb.ProtectionLevel_EXTERNAL_VPC:
-				kmd, ekmCerts, err := c.getExternalVPCKeyInfo(ctx, kek, cryptoKey, creds)
+				kmd, ekmCerts, err := c.getExternalVPCKeyInfo(ctx, cryptoKey, creds)
 				if err != nil {
 					return nil, nil, fmt.Errorf("error getting external VPC key info: %v", err)
 				}
@@ -452,7 +451,7 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 
 				uri = kek.GetKekUri()
 			case rpb.ProtectionLevel_EXTERNAL:
-				kmd, err := externalKEKMetadata(cryptoKey, kek)
+				kmd, err := externalKEKMetadata(cryptoKey)
 				if err != nil {
 					return nil, fmt.Errorf("error creating KEK Metadata: %v", err)
 				}
@@ -464,7 +463,7 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 				}
 				uri = kmd.uri
 			case rpb.ProtectionLevel_EXTERNAL_VPC:
-				kmd, ekmCerts, err := c.getExternalVPCKeyInfo(ctx, kek, cryptoKey, creds)
+				kmd, ekmCerts, err := c.getExternalVPCKeyInfo(ctx, cryptoKey, creds)
 				if err != nil {
 					return nil, fmt.Errorf("error getting external VPC key info: %v", err)
 				}

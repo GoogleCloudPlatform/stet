@@ -74,21 +74,16 @@ func TestGetExternalVPCKeyInfo(t *testing.T) {
 	cryptoKey := &rpb.CryptoKey{
 		CryptoKeyBackend: "test/ekmconn/name",
 		Primary: &rpb.CryptoKeyVersion{
+			Name: testutil.VPCKEK.ResourceName(),
 			ExternalProtectionLevelOptions: &rpb.ExternalProtectionLevelOptions{
 				EkmConnectionKeyPath: testKeyPath,
 			},
 		},
 	}
 
-	kek := &configpb.KekInfo{
-		KekType: &configpb.KekInfo_KekUri{
-			KekUri: testutil.VPCKEK.URI(),
-		},
-	}
-
 	client := &StetClient{testCloudEKMClient: ekmClient}
 
-	kmd, certs, err := client.getExternalVPCKeyInfo(context.Background(), kek, cryptoKey, "")
+	kmd, certs, err := client.getExternalVPCKeyInfo(context.Background(), cryptoKey, "")
 	if err != nil {
 		t.Fatalf("getExternalVPCKeyInfo failed: %v", err)
 	}
@@ -96,7 +91,7 @@ func TestGetExternalVPCKeyInfo(t *testing.T) {
 	expectedKMD := &kekMetadata{
 		protectionLevel: kmd.protectionLevel,
 		uri:             testVPCURI,
-		resourceName:    testutil.VPCKEK.Name,
+		resourceName:    testutil.VPCKEK.ResourceName(),
 	}
 	if !cmp.Equal(kmd, expectedKMD, cmp.AllowUnexported(kekMetadata{})) {
 		t.Errorf("getExternalVPCKeyInfo = %v, want %v", kmd, expectedKMD)
