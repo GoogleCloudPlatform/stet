@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
+load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 package(
     default_visibility = ["//:__subpackages__"],
@@ -34,6 +34,18 @@ go_library(
         "@com_github_google_go_tpm_tools//client:go_default_library",
         "@com_github_google_go_tpm_tools//proto/attest:go_default_library",
         "@com_google_cloud_go_compute_metadata//:go_default_library",
+        "@org_golang_google_protobuf//proto",
+    ],
+)
+
+go_test(
+    name = "securesession_test",
+    srcs = ["securesession_test.go"],
+    embed = [":securesession"],
+    deps = [
+        "//proto:attestation_evidence_go_proto",
+        "//proto:confidential_wrap_go_proto",
+        "//proto:secure_session_go_proto",
         "@org_golang_google_protobuf//proto",
     ],
 )

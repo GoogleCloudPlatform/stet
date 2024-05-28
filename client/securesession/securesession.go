@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"sync/atomic"
 	"syscall"
 
 	"cloud.google.com/go/compute/metadata"
@@ -54,6 +55,15 @@ const (
 	clientStateUnknown
 )
 
+type handshakeState uint32
+
+const (
+	handshakeUnknown handshakeState = iota
+	handshakeInitiated
+	handshakeCompleted
+	handshakeFailed
+)
+
 // recordBufferSize is the number of bytes allocated to buffers when reading
 // records from the TLS session. 16KB is the maximum TLS record size, so this
 // value guarantees incoming records will fit in the buffer.
@@ -75,12 +85,32 @@ func (ekmToken) RequireTransportSecurity() bool {
 	return false
 }
 
+// EKMClient is an interface for the Confidential EKM client.
+type EKMClient interface {
+	BeginSession(context.Context, *pb.BeginSessionRequest) (*pb.BeginSessionResponse, error)
+	Handshake(context.Context, *pb.HandshakeRequest) (*pb.HandshakeResponse, error)
+	NegotiateAttestation(context.Context, *pb.NegotiateAttestationRequest) (*pb.NegotiateAttestationResponse, error)
+	Finalize(context.Context, *pb.FinalizeRequest) (*pb.FinalizeResponse, error)
+	EndSession(context.Context, *pb.EndSessionRequest) (*pb.EndSessionResponse, error)
+	ConfidentialWrap(context.Context, *cwpb.ConfidentialWrapRequest) (*cwpb.ConfidentialWrapResponse, error)
+	ConfidentialUnwrap(context.Context, *cwpb.ConfidentialUnwrapRequest) (*cwpb.ConfidentialUnwrapResponse, error)
+}
+
+// TLSConn is an interface for the TLS connection.
+type TLSConn interface {
+	Write(b []byte) (n int, err error)
+	Read(b []byte) (n int, err error)
+	ConnectionState() tls.ConnectionState
+	Handshake() error
+}
+
 // SecureSessionClient is a SecureSession service client.
 type SecureSessionClient struct {
-	client           ekmclient.ConfidentialEKMClient
+	client           EKMClient
 	shim             transportshim.ShimInterface
-	tls              *tls.Conn
+	tls              TLSConn
 	state            clientState
+	handshakeState   *atomic.Value
 	ctx              []byte                            // the opaque session context
 	attestationTypes *aepb.AttestationEvidenceTypeList // attestation types requested by server
 }
@@ -169,8 +199,8 @@ func EstablishSecureSession(ctx context.Context, addr, authToken string, opts ..
 
 	// Continue making Handshake requests until the TLS handshake is complete.
 	for client.state != clientStateHandshakeCompleted {
-		if client.state == clientStateFailed {
-			return nil, fmt.Errorf("error on handshake: client in failure state")
+		if client.handshakeState.Load() == clientStateFailed {
+			return nil, fmt.Errorf("error on handshake: handshake in failure state")
 		}
 
 		if err := client.handshake(ctx); err != nil {
@@ -198,6 +228,7 @@ func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool,
 
 	c.client = ekmclient.ConfidentialEKMClient{URI: addr, AuthToken: authToken, CertPool: httpCertPool}
 	c.shim = transportshim.NewTransportShim()
+	c.handshakeState = &atomic.Value{}
 
 	cfg := &tls.Config{
 		CipherSuites: constants.AllowableCipherSuites,
@@ -221,10 +252,11 @@ func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool,
 	c.tls = tls.Client(c.shim, cfg)
 
 	// Kick off inner TLS session handshake and wait for a write.
+	c.handshakeState.Store(handshakeInitiated)
 	go func() {
 		if err := c.tls.Handshake(); err != nil {
 			glog.Errorf("Inner TLS handshake failed: %v", err.Error())
-			c.state = clientStateFailed
+			c.handshakeState.Store(handshakeFailed)
 			return
 		}
 		glog.Infof("Inner TLS handshake succeeded")
@@ -248,8 +280,8 @@ func (c *SecureSessionClient) beginSession(ctx context.Context) error {
 		return fmt.Errorf("error initializing TLS secure session: %v", err)
 	}
 
-	if resp.GetSessionContext() == nil {
-		return errors.New("Failed to initialize session; likely authentication error")
+	if len(resp.GetSessionContext()) == 0 {
+		return errors.New("failed to initialize session; likely authentication error")
 	}
 
 	// Update the state of the session.
@@ -281,6 +313,7 @@ func (c *SecureSessionClient) handshake(ctx context.Context) error {
 	// Update state of client if TLS indicates handshake is complete.
 	if c.tls.ConnectionState().HandshakeComplete {
 		c.state = clientStateHandshakeCompleted
+		c.handshakeState.Store(handshakeCompleted)
 	}
 
 	return nil
@@ -535,7 +568,7 @@ func (c *SecureSessionClient) EndSession(ctx context.Context) error {
 // using the specified key path and resource name, returning the wrapped blob.
 func (c *SecureSessionClient) ConfidentialWrap(ctx context.Context, keyPath, resourceName string, plaintext []byte) ([]byte, error) {
 	if c.state != clientStateAttestationAccepted {
-		return nil, errors.New("Called ConfidentialWrap with unestablished secure sesssion")
+		return nil, errors.New("Called ConfidentialWrap with unestablished secure session")
 	}
 
 	// Create a WrapRequest, marshal, then session-encrypt it.
@@ -597,7 +630,7 @@ func (c *SecureSessionClient) ConfidentialWrap(ctx context.Context, keyPath, res
 // blob via the given key path and resource name, returning the plaintext.
 func (c *SecureSessionClient) ConfidentialUnwrap(ctx context.Context, keyPath, resourceName string, wrappedBlob []byte) ([]byte, error) {
 	if c.state != clientStateAttestationAccepted {
-		return nil, errors.New("Called ConfidentialUnwrap with unestablished secure sesssion")
+		return nil, errors.New("Called ConfidentialUnwrap with unestablished secure session")
 	}
 
 	// Create an UnwrapRequest, marshal, then session-encrypt it.
