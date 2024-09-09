@@ -12,7 +12,7 @@ and `go build` commands), or via [Bazel](https://bazel.build/).
 ### Using Go's Native Toolchain
 
 1.  Install `make` and `curl` via `apt-get install build-essential curl`.
-2.  [Install Go 1.20+](https://golang.org/doc/install).
+2.  [Install Go 1.22+](https://golang.org/doc/install).
 3.  [Install `protoc` version 3](https://grpc.io/docs/protoc-installation/).
 4.  [Install Go plugins for the protocol compiler](https://grpc.io/docs/languages/go/quickstart/#prerequisites).
     *   Specifically, run `go install

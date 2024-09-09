@@ -42,8 +42,8 @@ proto_library(
     name = "confidential_wrap_proto",
     srcs = ["confidential_wrap.proto"],
     deps = [
+        "@com_google_googleapis//google/api:annotations_proto",
         "@com_google_protobuf//:duration_proto",
-        "@go_googleapis//google/api:annotations_proto",
     ],
 )
 
@@ -53,7 +53,7 @@ go_proto_library(
     importpath = "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto",
     proto = ":confidential_wrap_proto",
     visibility = ["//:__subpackages__"],
-    deps = ["@go_googleapis//google/api:annotations_go_proto"],
+    deps = ["@org_golang_google_genproto//googleapis/api/annotations"],
 )
 
 proto_library(
@@ -71,7 +71,7 @@ go_proto_library(
 proto_library(
     name = "secure_session_proto",
     srcs = ["secure_session.proto"],
-    deps = ["@go_googleapis//google/api:annotations_proto"],
+    deps = ["@com_google_googleapis//google/api:annotations_proto"],
 )
 
 go_proto_library(
@@ -80,5 +80,5 @@ go_proto_library(
     importpath = "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto",
     proto = ":secure_session_proto",
     visibility = ["//:__subpackages__"],
-    deps = ["@go_googleapis//google/api:annotations_go_proto"],
+    deps = ["@org_golang_google_genproto//googleapis/api/annotations"],
 )
