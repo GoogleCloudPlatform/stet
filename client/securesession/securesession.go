@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"net/url"
+	"os"
 	"sync/atomic"
 	"syscall"
 
@@ -68,6 +69,8 @@ const (
 // records from the TLS session. 16KB is the maximum TLS record size, so this
 // value guarantees incoming records will fit in the buffer.
 const recordBufferSize = 16384
+
+var eventLogFile = "/sys/kernel/security/tpm0/binary_bios_measurements"
 
 // ekmToken is a struct that implements credentials.PerRPCCredentials to
 // store a bearer token for authenticating requests to the EKM.
@@ -320,7 +323,7 @@ func (c *SecureSessionClient) handshake(ctx context.Context) error {
 }
 
 // negotiateAttestation confirms attestation evidence options with the server.
-func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
+func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) (ret error) {
 	req := &pb.NegotiateAttestationRequest{
 		SessionContext: c.ctx,
 	}
@@ -334,19 +337,25 @@ func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
 	if err := tryReescalatePrivileges(); err != nil {
 		return fmt.Errorf("failed to re-escalate to root privileges to open TPM device: %w", err)
 	}
+	defer func() {
+		// If failed to deescalate and there are no other errors, override the return.
+		if err := tryDeescalatePrivileges(); err != nil && ret == nil {
+			ret = fmt.Errorf("failed to de-escalate to user privileges: %v", err)
+		}
+	}()
 
 	if _, err := tpm2.OpenTPM("/dev/tpmrm0"); err != nil {
-		glog.Infof("TPM not available. Using null attestation")
+		glog.InfoContextf(ctx, "TPM not available. Using null attestation")
+	} else if _, err = os.Stat(eventLogFile); errors.Is(err, os.ErrNotExist) {
+		// If the TPM is available but event log is not, log and continue with null attestation.
+		glog.ErrorContextf(ctx, "TPM is available but Event Log is not. Using null attestation.")
 	} else {
+		// If both TPM and Event Log are available, add to supported evidence types.
 		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_TPM2_QUOTE)
 		evidenceTypes.Types = append(evidenceTypes.Types, aepb.AttestationEvidenceType_TCG_EVENT_LOG)
 
 		// Communicate to the server the nonce types that we support.
 		evidenceTypes.NonceTypes = append(evidenceTypes.NonceTypes, aepb.NonceType_NONCE_EKM32)
-	}
-
-	if err := tryDeescalatePrivileges(); err != nil {
-		return fmt.Errorf("failed to de-escalate to user privileges: %w", err)
 	}
 
 	// Write marshalled attestation evidence to TLS channel.
@@ -390,11 +399,18 @@ func (c *SecureSessionClient) negotiateAttestation(ctx context.Context) error {
 	return nil
 }
 
-func (c *SecureSessionClient) addTpmEvidence(evidence *aepb.AttestationEvidence) error {
+func (c *SecureSessionClient) addTpmEvidence(evidence *aepb.AttestationEvidence) (ret error) {
 	// Attempt to re-escalate execution privileges.
 	if err := tryReescalatePrivileges(); err != nil {
 		return fmt.Errorf("failed to re-escalate to root privileges to generate attestation: %w", err)
 	}
+	defer func() {
+		// If failed to deescalate and there are no other errors, override the return.
+		if err := tryDeescalatePrivileges(); err != nil && ret == nil {
+			ret = fmt.Errorf("failed to de-escalate to user privileges: %v", err)
+		}
+	}()
+
 	rwc, err := tpm2.OpenTPM("/dev/tpmrm0")
 	if err != nil {
 		glog.Errorf("Error opening TPM device: %v", err)
@@ -448,16 +464,11 @@ nonceLoop:
 	}
 
 	att, err := ek.Attest(tpmclient.AttestOpts{Nonce: nonce})
-
 	if err != nil {
 		return fmt.Errorf("error generating attestation: %v", err)
 	}
 
 	glog.Infof("Obtained attestation from the vTPM")
-
-	if err := tryDeescalatePrivileges(); err != nil {
-		return fmt.Errorf("failed to de-escalate to user privileges: %w", err)
-	}
 
 	// Add GCE instance info to the attestation proto.
 	projectID, err := metadata.ProjectID()

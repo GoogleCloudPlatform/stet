@@ -26,7 +26,7 @@ import (
 // buffer multiple byte slices. In initial testing, the TLS implementation
 // can read somewhere between 2KB to 8KB per call, and the largest vTPM
 // attestation is on the order of 32KB, so we set the size of the channel
-// to 100 to accomodate for this.
+// to 100 to accommodate for this.
 const sendBufLen = 100
 
 // Allow 1 MB of bytes to be buffered through the receiveBuf channel.
@@ -50,7 +50,7 @@ func NewTransportShim() ShimInterface {
 	return t
 }
 
-// QueueReceiveBuf inputs data receved from the counterparty, to be read.
+// QueueReceiveBuf inputs data received from the counterparty, to be read.
 func (shim *TransportShim) QueueReceiveBuf(buf []byte) {
 	for _, b := range buf {
 		shim.receiveBuf <- b
