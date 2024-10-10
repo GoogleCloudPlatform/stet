@@ -16,6 +16,7 @@
 
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
+load("//tools/build_defs/go:go_proto_library.bzl", "go_proto_library")
 
 licenses(["notice"])
 
