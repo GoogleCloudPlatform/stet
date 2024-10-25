@@ -13,7 +13,6 @@
 # limitations under the License.
 
 load("@io_bazel_rules_go//go:def.bzl", "go_binary")
-load("//tools/build_defs/go:go_binary.bzl", "go_binary")
 
 licenses(["notice"])
 

@@ -1,4 +1,4 @@
-# Copyright 2021 Google LLC
+# Copyright 2024 Google LLC
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,25 +15,28 @@
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
 package(
-    default_visibility = ["//:__subpackages__"],
+    default_visibility = [
+        "//client/internal/secret_sharing:__subpackages__",
+    ],
 )
 
 go_library(
-    name = "confidentialspace",
-    srcs = ["confidentialspace.go"],
-    importpath = "github.com/GoogleCloudPlatform/stet/client/confidentialspace",
+    name = "gf8",
+    srcs = ["gf8.go"],
+    importpath = "github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/internal/field/gf8",
     deps = [
-        "//proto:config_go_proto",
-        "@com_github_golang_glog//:glog",
+        "//client/internal/secret_sharing/finitefield",
+        "//client/internal/secret_sharing/internal/field",
     ],
 )
 
 go_test(
-    name = "confidentialspace_test",
-    srcs = ["confidentialspace_test.go"],
-    embed = [":confidentialspace"],
+    name = "gf8_test",
+    srcs = ["gf8_test.go"],
     deps = [
-        "//client/testutil",
-        "//proto:config_go_proto",
+        ":gf8",
+        "//client/internal/secret_sharing/finitefield",
+        "//client/internal/secret_sharing/internal/field",
+        "@com_github_google_go_cmp//cmp:go_default_library",
     ],
 )
