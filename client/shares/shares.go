@@ -19,9 +19,11 @@ import (
 	"bytes"
 	"fmt"
 
+	"github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/finitefield"
+	"github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/secrets"
+	"github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/shamir"
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
 	"github.com/google/tink/go/subtle/random"
-	"github.com/hashicorp/vault/shamir"
 
 	"crypto/sha256"
 )
@@ -59,17 +61,78 @@ func ValidateShare(share []byte, expectedHash []byte) bool {
 	return bytes.Equal(actualHash[:], expectedHash[:])
 }
 
+func convertToByteShares(shares []secrets.Share) [][]byte {
+	byteShares := make([][]byte, 0, len(shares))
+	for _, share := range shares {
+		// Hashicorp/vault appends the X value to the end of each share.
+		// We have to do this manually for backwards compatibility.
+		shareWithX := append(share.Value, byte(share.X))
+		byteShares = append(byteShares, shareWithX)
+	}
+
+	return byteShares
+}
+
 // SplitShares takes a DEK as `data`, and returns a slice of byte slices, each representing
 // one of the n shares.
-func SplitShares(data []byte, shares, threshold int) ([][]byte, error) {
-	return shamir.Split(data, shares, threshold)
+func SplitShares(data []byte, numShares, threshold int) ([][]byte, error) {
+	// Validate data length is DEKBytes.
+	if len(data) != int(DEKBytes) {
+		return nil, fmt.Errorf("data has length %v, expected %v", len(data), DEKBytes)
+	}
+
+	md := secrets.Metadata{
+		Field:     finitefield.GF8,
+		NumShares: numShares,
+		Threshold: threshold,
+	}
+	split, err := shamir.SplitSecret(md, data)
+	if err != nil {
+		return nil, fmt.Errorf("error splitting secret: %v", err)
+	}
+
+	// Validate the returned data.
+	if split.SecretLen != int(DEKBytes) {
+		return nil, fmt.Errorf("split indicates secret has length %v, expected %v", split.SecretLen, DEKBytes)
+	}
+
+	return convertToByteShares(split.Shares), nil
+}
+
+func convertToSecretShares(unwrappedShares []UnwrappedShare) []secrets.Share {
+	secretShares := make([]secrets.Share, 0, len(unwrappedShares))
+	for _, unwrapped := range unwrappedShares {
+		share := unwrapped.Share
+
+		// Split each share into the value and the X field (last byte).
+		secretShare := secrets.Share{
+			Value: share[:len(share)-1],
+			X:     int(share[len(share)-1]),
+		}
+
+		secretShares = append(secretShares, secretShare)
+	}
+
+	return secretShares
 }
 
 // CombineShares takes a list of shares and reconstitutes the original data. Note that this does not
 // guarantee the shares are correct (SSS will succeed at "reconstructing" data from
 // even faulty shares), so integrity checks are done separately.
-func CombineShares(shares [][]byte) ([]byte, error) {
-	return shamir.Combine(shares)
+func CombineShares(shares []UnwrappedShare, numShares, threshold int) ([]byte, error) {
+	secretShares := convertToSecretShares(shares)
+
+	split := secrets.Split{
+		SecretLen: int(DEKBytes),
+		Metadata: secrets.Metadata{
+			Field:     finitefield.GF8,
+			NumShares: numShares,
+			Threshold: threshold,
+		},
+		Shares: secretShares,
+	}
+
+	return shamir.Reconstruct(split)
 }
 
 // CreateDEKShares generates a DEK and - if applicable - splits it into shares.
@@ -132,14 +195,8 @@ func CombineUnwrappedShares(keyCfg *configpb.KeyConfig, unwrappedShares []Unwrap
 		if len(unwrappedShares) < int(keyCfg.GetShamir().GetThreshold()) {
 			return nil, fmt.Errorf("only successfully unwrapped %v shares, which is fewer than threshold of %v", len(unwrappedShares), keyCfg.GetShamir().GetThreshold())
 		}
-
-		var shares [][]byte
-		for _, share := range unwrappedShares {
-			shares = append(shares, share.Share)
-		}
-
 		var err error
-		combinedShares, err = CombineShares(shares)
+		combinedShares, err = CombineShares(unwrappedShares, int(keyCfg.GetShamir().GetShares()), int(keyCfg.GetShamir().GetThreshold()))
 		if err != nil {
 			return nil, fmt.Errorf("Error combining DEK shares: %v", err)
 		}

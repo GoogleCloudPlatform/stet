@@ -26,6 +26,9 @@ go_library(
     name = "shamir",
     srcs = ["shamir.go"],
     importpath = "github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/shamir",
+    visibility = [
+        "//client/shares:__subpackages__",
+    ],
     deps = [
         "//client/internal/secret_sharing/finitefield",
         "//client/internal/secret_sharing/internal/field",

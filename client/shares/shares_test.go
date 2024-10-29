@@ -18,6 +18,8 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/secrets"
+	"github.com/google/go-cmp/cmp"
 	"github.com/google/tink/go/subtle/random"
 )
 
@@ -73,8 +75,13 @@ func TestSplitSharesAndCombineSharesRestoresSecret(t *testing.T) {
 				if k == i || k == j {
 					continue
 				}
-				parts := [][]byte{shares[i], shares[j], shares[k]}
-				recomb, err := CombineShares(parts)
+				parts := []UnwrappedShare{
+					{Share: shares[i]},
+					{Share: shares[j]},
+					{Share: shares[k]},
+				}
+
+				recomb, err := CombineShares(parts, nShares, threshold)
 				if err != nil {
 					t.Fatalf("err: %v", err)
 				}
@@ -84,6 +91,68 @@ func TestSplitSharesAndCombineSharesRestoresSecret(t *testing.T) {
 					t.Fatalf("Indices of shares were (i:%d, j:%d, k:%d)", i, j, k)
 				}
 			}
+		}
+	}
+}
+
+func TestConvertToByteShares(t *testing.T) {
+	secretShares := []secrets.Share{
+		{X: 0, Value: []byte("share 0")},
+		{X: 1, Value: []byte("share 1")},
+		{X: 2, Value: []byte("share 2")},
+	}
+
+	converted := convertToByteShares(secretShares)
+
+	expected := [][]byte{
+		append(secretShares[0].Value, byte(secretShares[0].X)),
+		append(secretShares[1].Value, byte(secretShares[1].X)),
+		append(secretShares[2].Value, byte(secretShares[2].X)),
+	}
+
+	for i, share := range converted {
+		if !bytes.Equal(share, expected[i]) {
+			t.Errorf("convertToByteShares(%v) = %v at index %d, want %v", secretShares, share, i, expected[i])
+		}
+	}
+}
+
+func TestConvertToSecretShares(t *testing.T) {
+	expectedShares := []secrets.Share{
+		{
+			X:     0,
+			Value: []byte("share 0"),
+		},
+		{
+			X:     1,
+			Value: []byte("share 1"),
+		},
+		{
+			X:     2,
+			Value: []byte("share 2"),
+		},
+	}
+
+	unwrappedShares := []UnwrappedShare{
+		{
+			Share: append(expectedShares[0].Value, byte(expectedShares[0].X)),
+			URI:   "uri 0",
+		},
+		{
+			Share: append(expectedShares[1].Value, byte(expectedShares[1].X)),
+			URI:   "uri 1",
+		},
+		{
+			Share: append(expectedShares[2].Value, byte(expectedShares[2].X)),
+			URI:   "uri 2",
+		},
+	}
+
+	converted := convertToSecretShares(unwrappedShares)
+
+	for i, share := range converted {
+		if !cmp.Equal(share, expectedShares[i]) {
+			t.Errorf("convertToSecretShares() = %v at index %d, want %v", share, i, expectedShares[i])
 		}
 	}
 }

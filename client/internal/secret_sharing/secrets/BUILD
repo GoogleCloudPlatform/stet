@@ -24,5 +24,9 @@ go_library(
     name = "secrets",
     srcs = ["secrets.go"],
     importpath = "github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/secrets",
+    visibility = [
+        "//client/internal/secret_sharing:__subpackages__",
+        "//client/shares:__subpackages__",
+    ],
     deps = ["//client/internal/secret_sharing/finitefield"],
 )

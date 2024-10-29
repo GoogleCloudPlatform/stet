@@ -24,6 +24,10 @@ go_library(
     name = "finitefield",
     srcs = ["finitefield.go"],
     importpath = "github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/finitefield",
+    visibility = [
+        "//client/internal/secret_sharing:__subpackages__",
+        "//client/shares:__subpackages__",
+    ],
 )
 
 go_test(

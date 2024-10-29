@@ -23,9 +23,11 @@ go_library(
     srcs = ["shares.go"],
     importpath = "github.com/GoogleCloudPlatform/stet/client/shares",
     deps = [
+        "//client/internal/secret_sharing/finitefield",
+        "//client/internal/secret_sharing/secrets",
+        "//client/internal/secret_sharing/shamir",
         "//proto:config_go_proto",
         "@com_github_google_tink_go//subtle/random:go_default_library",
-        "@com_github_hashicorp_vault//:shamir",
     ],
 )
 
@@ -33,5 +35,9 @@ go_test(
     name = "shares_test",
     srcs = ["shares_test.go"],
     embed = [":shares"],
-    deps = ["@com_github_google_tink_go//subtle/random:go_default_library"],
+    deps = [
+        "//client/internal/secret_sharing/secrets",
+        "@com_github_google_go_cmp//cmp:go_default_library",
+        "@com_github_google_tink_go//subtle/random:go_default_library",
+    ],
 )
