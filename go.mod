@@ -15,7 +15,6 @@ require (
 	github.com/google/tink/go v1.7.0
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.13.0
-	github.com/hashicorp/vault v1.14.6
 	golang.org/x/oauth2 v0.23.0
 	google.golang.org/api v0.196.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20240903143218-8af14fe29dc1

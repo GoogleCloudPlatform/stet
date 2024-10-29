@@ -48,17 +48,17 @@ http_archive(
 # Protocol Buffers
 http_archive(
     name = "com_google_protobuf",
+    sha256 = "d0f5f605d0d656007ce6c8b5a82df3037e1d8fe8b121ed42e536f569dec16113",
     strip_prefix = "protobuf-3.14.0",
     urls = ["https://github.com/google/protobuf/archive/v3.14.0.tar.gz"],
-    sha256 = "d0f5f605d0d656007ce6c8b5a82df3037e1d8fe8b121ed42e536f569dec16113",
 )
 
 # Required by protobuf
 http_archive(
     name = "rules_python",
-    urls = ["https://github.com/bazelbuild/rules_python/archive/aa27a3fe7e1a6c73028effe1c78e87d2e7fab641.tar.gz"],
     sha256 = "9533911df1086debd5686ae4cfe3be6171faf65dfdb2e431619342689c3b9ed1",
     strip_prefix = "rules_python-aa27a3fe7e1a6c73028effe1c78e87d2e7fab641",
+    urls = ["https://github.com/bazelbuild/rules_python/archive/aa27a3fe7e1a6c73028effe1c78e87d2e7fab641.tar.gz"],
 )
 
 # Required by protobuf
@@ -78,27 +78,6 @@ http_archive(
         "https://mirror.bazel.build/github.com/bazelbuild/bazel-gazelle/releases/download/v0.38.0/bazel-gazelle-v0.38.0.tar.gz",
         "https://github.com/bazelbuild/bazel-gazelle/releases/download/v0.38.0/bazel-gazelle-v0.38.0.tar.gz",
     ],
-)
-
-# Used only for Shamir's Secret Sharing implementation.
-# NOTE: Not imported as go_repository to avoid pulling in all of vault's deps.
-http_archive(
-    name = "com_github_hashicorp_vault",
-    build_file_content = """
-load("@io_bazel_rules_go//go:def.bzl", "go_library")
-
-go_library(
-    name = "shamir",
-    srcs = [
-        "shamir/shamir.go",
-    ],
-    importpath = "github.com/hashicorp/vault/shamir",
-    visibility = ["//visibility:public"],
-)
-""",
-    sha256 = "0f186c600cbe2c098ff0407d8ea28250f269d043b51d22cfe9c4a568c4711e7a",
-    strip_prefix = "vault-1.14.6",
-    urls = ["https://github.com/hashicorp/vault/archive/refs/tags/v1.14.6.tar.gz"],
 )
 
 load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
@@ -148,7 +127,7 @@ go_repository(
 go_repository(
     name = "com_github_googleapis_gax_go_v2",
     build_directives = [
-      # https://github.com/bazelbuild/rules_go/issues/3625#issuecomment-1643804054
+        # https://github.com/bazelbuild/rules_go/issues/3625#issuecomment-1643804054
         "gazelle:resolve proto go google/rpc/code.proto @org_golang_google_genproto_googleapis_rpc//code",  # keep
         "gazelle:resolve proto proto google/rpc/code.proto @googleapis//google/rpc:code_proto",  # keep
     ],
@@ -224,12 +203,12 @@ go_repository(
 go_repository(
     name = "com_github_google_go_tpm_tools",
     importpath = "github.com/google/go-tpm-tools",
-    sum = "h1:oiQfAIkc6xTy9Fl5NKTeTJkBTlXdHsxAofmQyxBKY98=",
-    version = "v0.4.4",
     patches = [
         "patches/go-tpm-tools/BUILD.patch",
         "patches/go-tpm-tools/attest.proto.patch",
     ],
+    sum = "h1:oiQfAIkc6xTy9Fl5NKTeTJkBTlXdHsxAofmQyxBKY98=",
+    version = "v0.4.4",
 )
 
 # Needed for conformance test.
@@ -253,7 +232,7 @@ go_repository(
     name = "com_github_alecthomas_colour",
     importpath = "github.com/alecthomas/colour",
     sum = "h1:nOE9rJm6dsZ66RGWYSFrXw461ZIt9A6+nHgL7FRrDUk=",
-    version = "v0.1.0"
+    version = "v0.1.0",
 )
 
 go_repository(
@@ -283,24 +262,24 @@ go_repository(
 
 # Needed for go_tpm_tools.
 go_repository(
-  name = "com_github_google_go_sev_guest",
-  importpath = "github.com/google/go-sev-guest",
-  sum = "h1:gnww4U8fHV5DCPz4gykr1s8SEX1fFNcxCBy+vvXN24k=",
-  version = "v0.11.1",
-  patches = [
-    "patches/go-sev-guest/BUILD.patch",
-  ],
+    name = "com_github_google_go_sev_guest",
+    importpath = "github.com/google/go-sev-guest",
+    patches = [
+        "patches/go-sev-guest/BUILD.patch",
+    ],
+    sum = "h1:gnww4U8fHV5DCPz4gykr1s8SEX1fFNcxCBy+vvXN24k=",
+    version = "v0.11.1",
 )
 
 # Needed for go_tpm_tools.
 go_repository(
-  name = "com_github_google_go_tdx_guest",
-  importpath = "github.com/google/go-tdx-guest",
-  sum = "h1:gl0KvjdsD4RrJzyLefDOvFOUH3NAJri/3qvaL5m83Iw=",
-  version = "v0.3.1",
-  patches = [
-    "patches/go-tdx-guest/BUILD.patch",
-  ],
+    name = "com_github_google_go_tdx_guest",
+    importpath = "github.com/google/go-tdx-guest",
+    patches = [
+        "patches/go-tdx-guest/BUILD.patch",
+    ],
+    sum = "h1:gl0KvjdsD4RrJzyLefDOvFOUH3NAJri/3qvaL5m83Iw=",
+    version = "v0.3.1",
 )
 
 # Needed for com_github_google_go_tpm_tools.
@@ -332,42 +311,42 @@ go_repository(
     name = "com_github_mattn_go_isatty",
     importpath = "github.com/mattn/go-isatty",
     sum = "h1:xfD0iDuEKnDkl03q4limB+vH+GxLEtL/jb4xVJSWWEY=",
-    version = "v0.0.20"
+    version = "v0.0.20",
 )
 
 go_repository(
     name = "com_github_pkg_errors",
     importpath = "github.com/pkg/errors",
     sum = "h1:FEBLx1zS214owpjy7qsBeixbURkuhQAwrK5UwLGTwt4=",
-    version = "v0.9.1"
+    version = "v0.9.1",
 )
 
 go_repository(
     name = "com_github_pborman_uuid",
     importpath = "github.com/pborman/uuid",
     sum = "h1:+ZZIw58t/ozdjRaXh/3awHfmWRbzYxJoAdNJxe/3pvw=",
-    version = "v1.2.1"
+    version = "v1.2.1",
 )
 
 go_repository(
-  name = "com_github_google_logger",
-  importpath = "github.com/google/logger",
-  sum = "h1:+6Z2geNxc9G+4D4oDO9njjjn2d0wN5d7uOo0vOIW1NQ=",
-  version = "v1.1.1",
+    name = "com_github_google_logger",
+    importpath = "github.com/google/logger",
+    sum = "h1:+6Z2geNxc9G+4D4oDO9njjjn2d0wN5d7uOo0vOIW1NQ=",
+    version = "v1.1.1",
 )
 
 go_repository(
-  name = "com_github_google_s2a_go",
-  importpath = "github.com/google/s2a-go",
-  sum = "h1:zZDs9gcbt9ZPLV0ndSyQk6Kacx2g/X+SKYovpnz3SMM=",
-  version = "v0.1.8",
+    name = "com_github_google_s2a_go",
+    importpath = "github.com/google/s2a-go",
+    sum = "h1:zZDs9gcbt9ZPLV0ndSyQk6Kacx2g/X+SKYovpnz3SMM=",
+    version = "v0.1.8",
 )
 
 go_repository(
-  name = "com_github_googleapis_enterprise_certificate_proxy",
-  importpath = "github.com/googleapis/enterprise-certificate-proxy",
-  sum = "h1:QRje2j5GZimBzlbhGA2V2QlGNgL8G6e+wGo/+/2bWI0=",
-  version = "v0.3.3",
+    name = "com_github_googleapis_enterprise_certificate_proxy",
+    importpath = "github.com/googleapis/enterprise-certificate-proxy",
+    sum = "h1:QRje2j5GZimBzlbhGA2V2QlGNgL8G6e+wGo/+/2bWI0=",
+    version = "v0.3.3",
 )
 
 go_repository(
@@ -531,11 +510,12 @@ go_repository(
     version = "v1.2.2",
 )
 
-
 # General go toolchain dependencies
 load("@io_bazel_rules_go//go:deps.bzl", "go_register_toolchains", "go_rules_dependencies")
+
 go_rules_dependencies()
-go_register_toolchains(version="1.22.0")
+
+go_register_toolchains(version = "1.22.0")
 
 # Required for go_repository imports.
 gazelle_dependencies()
