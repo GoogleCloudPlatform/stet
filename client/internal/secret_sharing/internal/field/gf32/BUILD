@@ -20,7 +20,7 @@ package(
     ],
 )
 
-licenses(["notice"])
+licenses(["reciprocal"])
 
 go_library(
     name = "gf32",
