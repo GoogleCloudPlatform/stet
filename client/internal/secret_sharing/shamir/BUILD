@@ -20,7 +20,7 @@ package(
     ],
 )
 
-licenses(["reciprocal"])
+licenses(["notice"])
 
 go_library(
     name = "shamir",

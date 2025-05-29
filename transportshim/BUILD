@@ -14,7 +14,7 @@
 
 load("@io_bazel_rules_go//go:def.bzl", "go_library", "go_test")
 
-licenses(["reciprocal"])
+licenses(["notice"])
 
 package(default_visibility = ["//visibility:private"])
 

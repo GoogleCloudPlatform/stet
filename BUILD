@@ -1,6 +1,6 @@
 load("@rules_license//rules:license.bzl", "license")
 
-licenses(["reciprocal"])
+licenses(["notice"])
 
 package(default_applicable_licenses = [":license"])
 

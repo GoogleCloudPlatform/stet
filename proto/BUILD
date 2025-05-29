@@ -17,7 +17,7 @@
 load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
 load("@rules_proto//proto:defs.bzl", "proto_library")
 
-licenses(["reciprocal"])
+licenses(["notice"])
 
 package(
     default_applicable_licenses = ["//:license"],

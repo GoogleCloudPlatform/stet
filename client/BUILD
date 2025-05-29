@@ -19,7 +19,7 @@ package(
     default_visibility = ["//:__subpackages__"],
 )
 
-licenses(["reciprocal"])
+licenses(["notice"])
 
 go_library(
     name = "client",
