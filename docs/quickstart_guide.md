@@ -207,10 +207,10 @@ $ stet -logtostderr decrypt /tmp/encrypted.data /tmp/plaintext.txt
 
 Once STET is installed on your system,
 [`gsutil`](https://github.com/GoogleCloudPlatform/gsutil) 5.0 and higher can be
-used in conjuncation with STET. If `gsutil` can find STET in your `$PATH` and
-the `--stet` flag is passed, file uploads will be encrypted via STET (and the
-blob ID is set to the final upload location), and file downloads will be
-decrypted via STET before being written to disk.
+used in conjunction with STET. If `gsutil` can find STET in your `$PATH` and the
+`--stet` flag is passed, file uploads will be encrypted via STET (and the blob
+ID is set to the final upload location), and file downloads will be decrypted
+via STET before being written to disk.
 
 ```bash
 # Equivalent to `stet encrypt` followed by `gsutil cp`.

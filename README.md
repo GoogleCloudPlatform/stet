@@ -6,10 +6,7 @@ environment attestations to aid in key release policy decisions.
 
 ## Building STET
 
-STET can be built manually using *either* Go's native toolchain (e.g. `go get`
-and `go build` commands), or via [Bazel](https://bazel.build/).
-
-### Using Go's Native Toolchain
+STET can be built manually using Go's native toolchain.
 
 1.  Install `make` and `curl` via `apt-get install build-essential curl`.
 2.  [Install Go 1.22+](https://golang.org/doc/install).
@@ -30,22 +27,6 @@ and `go build` commands), or via [Bazel](https://bazel.build/).
     $ sudo mv stet /usr/local/bin
     $ sudo chown root /usr/local/bin/stet
     $ sudo chmod u+sx,a+rs /usr/local/bin/stet
-    ```
-
-### Using Bazel
-
-1.  [Install Bazel](https://docs.bazel.build/versions/main/install.html)
-2.  From the root of this source repository, run `bazel build cmd/stet:main`
-    *   This will download all necessary dependencies
-    *   The resulting binary will be found at `bazel-bin/cmd/stet/main_/main`
-3.  Copy the resulting binary to an executable location, granting it `suid`
-    permissions (root permissions are required to generate attestations in a
-    Confidential VM):
-
-    ```bash
-    $ sudo mv bazel-bin/cmd/stet/main_/main /usr/local/bin
-    $ sudo chown root /usr/local/bin/stet
-    $ sudo chmod u+sx,a+rx /usr/local/bin/stet
     ```
 
 ### Prebuilt Binaries
