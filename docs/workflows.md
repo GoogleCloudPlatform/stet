@@ -64,14 +64,14 @@ STET for a Cloud Data Ingress workflow.
 # Encrypt the data
 $ stet encrypt plaintext.txt encrypted.dat
 # Upload the data to a GCS bucket
-$ gsutil cp encrypted.dat gs://my-bucket/
+$ gcloud storage cp encrypted.dat gs://my-bucket/
 ```
 
 #### Commands run in Confidential VM
 
 ```bash
 # Download the data
-$ gsutil cp gs://my-bucket/encrypted.dat .
+$ gcloud storage cp gs://my-bucket/encrypted.dat .
 # Decrypt the data
 $ stet decrypt encrypted.dat plaintext.txt
 ```
@@ -148,14 +148,14 @@ using STET for a Cloud Data Egress workflow.
 # Encrypt the data
 $ stet encrypt plaintext.txt encrypted.dat
 # Upload the data to a GCS bucket
-$ gsutil cp encrypted.dat gs://my-bucket/
+$ gcloud storage cp encrypted.dat gs://my-bucket/
 ```
 
 #### Commands run on-premises
 
 ```bash
 # Download the data
-$ gsutil cp gs://my-bucket/encrypted.dat .
+$ gcloud storage cp gs://my-bucket/encrypted.dat .
 # Decrypt the data
 $ stet decrypt encrypted.dat plaintext.txt
 ```
@@ -222,14 +222,14 @@ using STET for Intra-Cloud Data.
 # Encrypt the data
 $ stet encrypt plaintext.txt encrypted.dat
 # Upload the data to a GCS bucket
-$ gsutil cp encrypted.dat gs://my-bucket/
+$ gcloud storage cp encrypted.dat gs://my-bucket/
 ```
 
 #### Commands run in decrypting Confidential VM
 
 ```bash
 # Download the data
-$ gsutil cp gs://my-bucket/encrypted.dat .
+$ gcloud storage cp gs://my-bucket/encrypted.dat .
 # Decrypt the data
 $ stet decrypt encrypted.dat plaintext.txt
 ```
