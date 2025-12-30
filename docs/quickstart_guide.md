@@ -214,10 +214,8 @@ via STET before being written to disk.
 
 ```bash
 # Equivalent to `stet encrypt` followed by `gsutil cp`.
-# gsutil command cannot be translated to gcloud storage because the --stet flag is not supported.
 $ gsutil cp --stet secrets.txt "gs://my-bucket/my-secrets"
 
 # Equivalent to `stet decrypt` followed by `gsutil cp`.
-# gsutil command cannot be translated to gcloud storage because the --stet flag is not supported.
 $ gsutil cp --stet "gs://my-bucket/my-secrets" plaintext.txt
 ```
