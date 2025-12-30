@@ -274,10 +274,8 @@ blob ID is set to the final upload location), and file downloads will be
 decrypted via STET before being written to disk.
 
 ```bash
-# gcloud storage cp does not support the --stet flag.
-$ gcloud storage cp secrets.txt "gs://my-bucket/my-secrets"
-# gcloud storage cp does not support the --stet flag.
-$ gcloud storage cp "gs://my-bucket/my-secrets" plaintext.txt
+$ gsutil cp --stet secrets.txt "gs://my-bucket/my-secrets"
+$ gsutil cp --stet "gs://my-bucket/my-secrets" plaintext.txt
 ```
 
 The `stet_binary_path` and `stet_config_path` variables can be set in your
