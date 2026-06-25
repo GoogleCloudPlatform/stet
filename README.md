@@ -35,7 +35,7 @@ Alternatively, prebuilt binaries are automatically compiled and bundled with
 releases of STET, which can be found on the
 [Releases page](https://github.com/GoogleCloudPlatform/stet/releases). As with
 the above instructions, the binary should be copied to an executable location
-and granted `suid`positions as well:
+and granted `suid `positions as well:
 
 ```bash
 $ tar -zxf stet_1.0.0_linux_x86_64.tar.gz

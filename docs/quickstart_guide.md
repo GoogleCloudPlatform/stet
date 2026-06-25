@@ -14,6 +14,7 @@ Cloud KMS/EKM.
 1.  Enable the
     [IAM Service Account Credentials API](https://console.cloud.google.com/apis/api/iamcredentials.googleapis.com/overview)
     for your project if not already enabled.
+
 2.  Create a service account in the
     [IAM console](https://console.cloud.google.com/iam-admin/serviceaccounts).
     In the *"Grant this service account access to project"* step of service
@@ -60,16 +61,22 @@ will now create that VM.
 1.  Enable the
     [Compute Engine API](https://console.cloud.google.com/apis/api/compute.googleapis.com/overview)
     for your project if not already enabled.
+
 1.  Go to the [Google Compute Engine](http://console.cloud.google.com/compute)
     console
+
 1.  Click "Create Instance" to create a new VM and give the VM a name.
+
 1.  Select the "Enable the Confidential Computing service on this VM instance."
     checkbox to make this VM a Confidential VM.
+
 1.  Under "Identity and API access", select the service account you created
     above.
+
 1.  Click "Create" to complete the VM creation process. It will take a few
     minutes for the VM to be provisioned and finish booting. You can continue
     with the guide while that is done.
+
 1.  For the remainder of this guide, commands can be executed in this
     Confidential VM through an
     [SSH connection](https://cloud.google.com/compute/docs/instances/connecting-to-instance).
@@ -89,19 +96,25 @@ Cloud KMS of the location of this key.
 1.  Navigate to the
     [Key Management section](https://console.cloud.google.com/security/kms/keyrings)
     of the Google Cloud Console.
+
 1.  Create a new key ring if necessary.
+
     *   Note that this key ring cannot be in the *global* location, since
         external keys must be region-specific. The location should ideally be
         one that is geographically close to the location of the Confidential VM
         and the EKM.
+
 1.  Start to create a new key associated with that key ring, choosing the
     **Externally managed key** type.
+
     *   **You will need get the key URI from step 4 before finishing the key
         creation.**
     *   Take note of the service account that needs to be authorized in the EKM.
     *   See the [Cloud EKM documentation](https://cloud.google.com/kms/docs/ekm)
         for more information.
+
 1.  Create a key in the EKM. Please refer to the user guide provided by the EKM.
+
     *   If using Thales' CipherTrust Cloud Key Manager, note the following
         considerations:
         *   Your GCP project ID will need to be added to the CCKM in order to
@@ -137,6 +150,7 @@ Cloud KMS of the location of this key.
                 (including the one created earlier in the
                 [Create and Configure a Service Account](#create-and-configure-a-service-account)
                 section)
+
 1.  Return to Google Cloud Console and paste the key URI from your EKM,
     completing the key setup flow started in step 3.
 

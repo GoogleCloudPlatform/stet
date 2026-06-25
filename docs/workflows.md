@@ -266,13 +266,18 @@ your configuration.
 1.  Navigate to the
     [Key Management section](https://console.cloud.google.com/security/kms/keyrings)
     of the Google Cloud Console.
+
 1.  Create a new key ring if necessary
+
 1.  Create a new key associated with the key ring
+
     *   *Protection Level:* Software
     *   *Purpose:* Symmetric encrypt/decrypt
+
 1.  Click the `...` next to the key and choose **Copy Resource Name**. This is
     the **KEK URI** which will need to be referenced when creating your
     configuration files.
+
     *   The KEK URI must be prefixed with `gcp-kms://`.
     *   If the resource name is a
         [key version](https://cloud.google.com/kms/docs/resource-hierarchy#retrieve_resource_id),

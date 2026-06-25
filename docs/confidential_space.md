@@ -27,13 +27,16 @@ and credential information, and (B)
 To use CloudKMS Attestation in STET, add a `confidential_space_configs` section
 to your STET config file. This contains one or more `kek_credentials`, each of
 which contains information about credentials needed to access a Confidential
-Space WIP-protected KEK: * `kek_uri_pattern` is a regex pattern indicating the
-URIs of KEKs that should be this set of credentials. * `wip_name` is the
-identifier of the WIP, which should be of the format
-`projects/*/locations/*/workloadIdentityPools/*/providers/*`. *
-`service_account` is the trusted service account that will be used to access the
-KEK. * `mode` refers to whether these credentials are used for encrypt and/or
-decrypt. Defaults to `DEFAULT_ENCRYPT_AND_DECRYPT_MODE`.
+Space WIP-protected KEK:
+
+*   `kek_uri_pattern` is a regex pattern indicating the URIs of KEKs that should
+    be this set of credentials.
+*   `wip_name` is the identifier of the WIP, which should be of the format
+    `projects/*/locations/*/workloadIdentityPools/*/providers/*`.
+*   `service_account` is the trusted service account that will be used to access
+    the KEK.
+*   `mode` refers to whether these credentials are used for encrypt and/or
+    decrypt. Defaults to `DEFAULT_ENCRYPT_AND_DECRYPT_MODE`.
 
 #### Example
 

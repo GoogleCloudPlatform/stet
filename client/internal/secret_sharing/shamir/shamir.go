@@ -28,7 +28,7 @@
 //     providing a chosen share.
 //     Examples of this attack: https://crypto.stackexchange.com/q/41994/76875
 //
-// [Shamir Secret Sharing]: https://web.mit.edu/6.857/OldStuff/Fall03/ref/Shamir-HowToShareAsecrets.pdf
+// [Shamir Secret Sharing]: https://web.mit.edu/6.857/OldStuff/Fall03/ref/Shamir-HowToShareASecret.pdf
 package shamir
 
 import (

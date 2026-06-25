@@ -33,8 +33,10 @@ There are 3 components to a `key_config`:
 1.  A series of `kek_info` objects, each describing a unique Key Encryption Key
     used to encrypt or decrypt the data. Each `kek_info` includes the URI of its
     respective key.
+
 1.  The `dek_algorithm` used to encrypt or decrypt the data. The only currently
     supported algorithm is AES-256-GCM.
+
 1.  The "key-splitting algorithm" and details of the key splitting. This is
     where the amount of "split trust" can be configured.
 
@@ -48,6 +50,7 @@ The following key-splitting algorithms are currently supported:
 
 *   `no_split`: This algorithm does not split the trust. The key encryption key
     used is wholly known by the single KMS or asymmetric key being used.
+
 *   `shamir`: This algorithm splits the trust between a number of KMS systems or
     asymmetric keys (specified by `shares`) during encryption. Decryption
     requires a minimum number of those shares (specified by `threshold`) to be
