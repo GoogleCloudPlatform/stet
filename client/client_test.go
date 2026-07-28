@@ -27,8 +27,8 @@ import (
 	"github.com/GoogleCloudPlatform/stet/client/shares"
 	"github.com/GoogleCloudPlatform/stet/client/testutil"
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/tink/go/subtle/random"
 	"github.com/googleapis/gax-go/v2"
+	"github.com/tink-crypto/tink-go/v2/subtle/random"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/testing/protocmp"
 

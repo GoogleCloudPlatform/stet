@@ -12,10 +12,9 @@ require (
 	github.com/google/go-tpm v0.9.8
 	github.com/google/go-tpm-tools v0.4.9
 	github.com/google/subcommands v1.2.0
-	github.com/google/tink/go v1.7.0
 	github.com/google/uuid v1.6.0
 	github.com/googleapis/gax-go/v2 v2.23.0
-	golang.org/x/crypto v0.54.0
+	github.com/tink-crypto/tink-go/v2 v2.7.0
 	golang.org/x/oauth2 v0.36.0
 	google.golang.org/api v0.289.0
 	google.golang.org/genproto/googleapis/api v0.0.0-20260715232425-e75dac1f907d
@@ -50,6 +49,7 @@ require (
 	go.opentelemetry.io/otel/trace v1.44.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
+	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/net v0.57.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect

@@ -28,7 +28,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/stet/client/shares"
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
-	"github.com/google/tink/go/streamingaead/subtle"
+	"github.com/tink-crypto/tink-go/v2/streamingaead/subtle"
 	"google.golang.org/protobuf/proto"
 )
 

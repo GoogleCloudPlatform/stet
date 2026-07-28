@@ -23,7 +23,7 @@ import (
 	"github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/secrets"
 	"github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/shamir"
 	configpb "github.com/GoogleCloudPlatform/stet/proto/config_go_proto"
-	"github.com/google/tink/go/subtle/random"
+	"github.com/tink-crypto/tink-go/v2/subtle/random"
 
 	"crypto/sha256"
 )

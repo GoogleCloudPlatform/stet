@@ -20,7 +20,7 @@ import (
 
 	"github.com/GoogleCloudPlatform/stet/client/internal/secret_sharing/secrets"
 	"github.com/google/go-cmp/cmp"
-	"github.com/google/tink/go/subtle/random"
+	"github.com/tink-crypto/tink-go/v2/subtle/random"
 )
 
 func TestHashShareIsVerifiedByValidateShare(t *testing.T) {
