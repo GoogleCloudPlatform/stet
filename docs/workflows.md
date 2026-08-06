@@ -64,7 +64,7 @@ STET for a Cloud Data Ingress workflow.
 # Encrypt the data
 $ stet encrypt plaintext.txt encrypted.dat
 # Upload the data to a GCS bucket
-$ gcloud storage encrypted.dat gs://my-bucket/
+$ gcloud storage cp encrypted.dat gs://my-bucket/
 ```
 
 #### Commands run in Confidential VM
