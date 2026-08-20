@@ -275,7 +275,7 @@ func ReadMetadata(input io.Reader) (*configpb.Metadata, error) {
 
 	// Based on the metadata length in `header`, read metadata from `input`.
 	metadataBytes := make([]byte, header.MetadataLen)
-	if _, err := input.Read(metadataBytes); err != nil {
+	if _, err := io.ReadFull(input, metadataBytes); err != nil {
 		return nil, fmt.Errorf("failed to read encrypted file metadata: %v", err)
 	}
 

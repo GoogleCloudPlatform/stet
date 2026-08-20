@@ -301,6 +301,13 @@ func (c *StetClient) wrapShares(ctx context.Context, unwrappedShares [][]byte, o
 				return nil, nil, fmt.Errorf("error wrapping key share: %v", err)
 			}
 
+		case *configpb.KekInfo_MlkemFingerprint:
+			var err error
+			wrapped.Share, err = wrapShareWithMLKEM(share, kek, opts.asymmetricKeys)
+			if err != nil {
+				return nil, nil, fmt.Errorf("error wrapping key share with HPKE: %w", err)
+			}
+
 		case *configpb.KekInfo_KekUri:
 			// Configure CloudKMS Client, with Confidential Space credentials if applicable.
 			creds := ""
@@ -413,6 +420,14 @@ func (c *StetClient) unwrapAndValidateShares(ctx context.Context, wrappedShares 
 			unwrapped.Share, err = rsa.DecryptOAEP(sha256.New(), rand.Reader, key, wrapped.GetShare(), nil)
 			if err != nil {
 				glog.Errorf("Error unwrapping key share for %v: %v", kek.GetKekUri(), err)
+				continue
+			}
+
+		case *configpb.KekInfo_MlkemFingerprint:
+			var err error
+			unwrapped.Share, err = unwrapShareWithMLKEM(wrapped.GetShare(), kek, opts.asymmetricKeys)
+			if err != nil {
+				glog.ErrorContextf(ctx, "Error decrypting share with HPKE: %v", err)
 				continue
 			}
 
@@ -581,7 +596,7 @@ func (c *StetClient) Encrypt(ctx context.Context, input io.Reader, output io.Wri
 }
 
 // Returns whether the number of unwrapped shares is sufficient for combining the DEK based
-// on the splitting
+// on the splitting.
 func enoughUnwrappedShares(shares []shares.UnwrappedShare, config *configpb.KeyConfig) error {
 	numShares := len(shares)
 

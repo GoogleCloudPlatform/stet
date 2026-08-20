@@ -58,7 +58,7 @@ func TestParseEKMKeyURI(t *testing.T) {
 }
 
 func TestGetKekCryptoKey(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	testcases := []struct {
 		name    string
@@ -109,7 +109,7 @@ func TestGetKekCryptoKey(t *testing.T) {
 }
 
 func TestGetKekCryptoKeyRSAFingerprint(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	kekInfo := &configpb.KekInfo{
 		KekType: &configpb.KekInfo_RsaFingerprint{RsaFingerprint: testPublicFingerprint},
@@ -128,7 +128,7 @@ func TestGetKekCryptoKeyRSAFingerprint(t *testing.T) {
 }
 
 func TestGetKekCryptoKeyErrors(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	validKekInfo := &configpb.KekInfo{
 		KekType: &configpb.KekInfo_KekUri{KekUri: testutil.SoftwareKEK.URI()},
 	}
@@ -242,7 +242,7 @@ func TestExternalKEKMetadataError(t *testing.T) {
 }
 
 func TestEkmSecureSessionWrap(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	plaintext := []byte("this is plaintext")
 	md := kekMetadata{uri: testutil.ExternalKEK.URI()}
 	expectedCiphertext := append(plaintext, byte('E'))
@@ -261,15 +261,17 @@ func TestEkmSecureSessionWrap(t *testing.T) {
 }
 
 func TestEkmSecureSessionWrapError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	testCases := []struct {
 		name              string
+		uri               string
 		fakeEkmClient     *testutil.FakeSecureSessionClient
 		expectedErrSubstr string
 	}{
 		{
 			name: "ConfidentialWrap returns error",
+			uri:  "https://test.ekm.io/endpoints/123456",
 			fakeEkmClient: &testutil.FakeSecureSessionClient{
 				WrapErr: errors.New("this is an error from ConfidentialWrap"),
 			},
@@ -277,25 +279,32 @@ func TestEkmSecureSessionWrapError(t *testing.T) {
 		},
 		{
 			name: "EndSession returns error",
+			uri:  "https://test.ekm.io/endpoints/123456",
 			fakeEkmClient: &testutil.FakeSecureSessionClient{
 				EndSessionErr: errors.New("this is an error from EndSession"),
 			},
 			expectedErrSubstr: "ending secure session",
+		},
+		{
+			name:              "Invalid URI",
+			uri:               "::",
+			fakeEkmClient:     &testutil.FakeSecureSessionClient{},
+			expectedErrSubstr: "could not parse",
 		},
 	}
 
 	for _, testCase := range testCases {
 		stetClient := &StetClient{testSecureSessionClient: testCase.fakeEkmClient}
 
-		_, err := stetClient.ekmSecureSessionWrap(ctx, []byte("this is plaintext"), kekMetadata{uri: "this is a uri"}, nil)
+		_, err := stetClient.ekmSecureSessionWrap(ctx, []byte("this is plaintext"), kekMetadata{uri: testCase.uri}, nil)
 		if err == nil {
-			t.Errorf("ekmSecureSessionWrap(context.Background, \"this is plaintext\", \"this is a uri\") returned no error, expected to return error related to %s", testCase.expectedErrSubstr)
+			t.Errorf("ekmSecureSessionWrap(context.Background, \"this is plaintext\", %q) returned no error, expected to return error related to %q", testCase.uri, testCase.expectedErrSubstr)
 		}
 	}
 }
 
 func TestEkmSecureSessionUnwrap(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	expectedPlaintext := []byte("this is plaintext")
 	md := kekMetadata{uri: testutil.ExternalKEK.URI()}
 	ciphertext := append(expectedPlaintext, byte('E'))
@@ -304,25 +313,27 @@ func TestEkmSecureSessionUnwrap(t *testing.T) {
 
 	plaintext, err := stetClient.ekmSecureSessionUnwrap(ctx, ciphertext, md, nil)
 	if err != nil {
-		t.Fatalf("ekmSecureSessionUnwrap(context.Background(), \"%s\", \"%v\") returned error: %v", ciphertext, md, err)
+		t.Fatalf("ekmSecureSessionUnwrap(t.Context(), \"%s\", \"%v\") returned error: %v", ciphertext, md, err)
 	}
 
 	if !bytes.Equal(plaintext, expectedPlaintext) {
-		t.Errorf("ekmSecureSessionUnwrap(context.Background(), \"%s\", \"%v\") did not return expected wrapped share. Got %v, want %v", ciphertext, md, plaintext, expectedPlaintext)
+		t.Errorf("ekmSecureSessionUnwrap(t.Context(), \"%s\", \"%v\") did not return expected wrapped share. Got %v, want %v", ciphertext, md, plaintext, expectedPlaintext)
 	}
 
 }
 
 func TestEkmSecureSessionUnwrapError(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 
 	testCases := []struct {
 		name              string
+		uri               string
 		fakeEkmClient     *testutil.FakeSecureSessionClient
 		expectedErrSubstr string
 	}{
 		{
 			name: "ConfidentialUnwrap returns error",
+			uri:  testutil.ExternalKEK.URI(),
 			fakeEkmClient: &testutil.FakeSecureSessionClient{
 				UnwrapErr: errors.New("this is an error from ConfidentialUnwrap"),
 			},
@@ -330,19 +341,26 @@ func TestEkmSecureSessionUnwrapError(t *testing.T) {
 		},
 		{
 			name: "EndSession returns error",
+			uri:  testutil.ExternalKEK.URI(),
 			fakeEkmClient: &testutil.FakeSecureSessionClient{
 				EndSessionErr: errors.New("this is an error from EndSession"),
 			},
 			expectedErrSubstr: "ending secure session",
+		},
+		{
+			name:              "Invalid URI",
+			uri:               "::",
+			fakeEkmClient:     &testutil.FakeSecureSessionClient{},
+			expectedErrSubstr: "could not parse",
 		},
 	}
 
 	for _, testCase := range testCases {
 		stetClient := &StetClient{testSecureSessionClient: testCase.fakeEkmClient}
 
-		_, err := stetClient.ekmSecureSessionUnwrap(ctx, []byte("this is ciphertext"), kekMetadata{uri: testutil.ExternalKEK.URI()}, nil)
+		_, err := stetClient.ekmSecureSessionUnwrap(ctx, []byte("this is ciphertext"), kekMetadata{uri: testCase.uri}, nil)
 		if err == nil {
-			t.Errorf("ekmSecureSessionUnwrap(context.Background, \"this is ciphertext\", %v) returned no error, expected to return error related to %s", testutil.ExternalKEK.URI(), testCase.expectedErrSubstr)
+			t.Errorf("ekmSecureSessionUnwrap(context.Background, \"this is ciphertext\", %q) returned no error, expected to return error related to %q", testCase.uri, testCase.expectedErrSubstr)
 		}
 	}
 }
@@ -377,7 +395,7 @@ func TestWrapSharesIndividually(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -422,7 +440,7 @@ func TestWrapUnwrapShareAsymmetricKey(t *testing.T) {
 	testShare := []byte("Foo!")
 	testHashedShare := shares.HashShare(testShare)
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	ki := []*configpb.KekInfo{
 		&configpb.KekInfo{
@@ -556,7 +574,7 @@ func TestWrapUnwrapShareAsymmetricKeyError(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -596,7 +614,7 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 		testutil.FakeKMSWrap(sharesList[1], testutil.HSMKEK.Name),
 		append(sharesList[2], byte('E')),
 	}
-	ctx := context.Background()
+	ctx := t.Context()
 
 	expectedURIs := []string{testutil.SoftwareKEK.URI(), testutil.HSMKEK.URI(), testutil.ExternalEKMURI}
 
@@ -634,7 +652,7 @@ func TestWrapSharesWithMultipleShares(t *testing.T) {
 }
 
 func TestWrapSharesWithConfidentialSpace(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tokenFile := testutil.CreateTempTokenFile(t)
 
 	// Define three test KEKs, each of which should map to a different KMS client.
@@ -828,7 +846,7 @@ func TestWrapSharesError(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -902,7 +920,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	stetClient := &StetClient{
 		testKMSClients: &cloudkms.ClientFactory{
@@ -941,7 +959,7 @@ func TestUnwrapAndValidateSharesIndividually(t *testing.T) {
 }
 
 func TestUnwrapAndValidateSharesWithConfidentialSpace(t *testing.T) {
-	ctx := context.Background()
+	ctx := t.Context()
 	tokenFile := testutil.CreateTempTokenFile(t)
 
 	// Define three test KEKs, each of which should map to a different KMS client.
@@ -1067,7 +1085,7 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	stetClient := &StetClient{
 		testKMSClients: &cloudkms.ClientFactory{
@@ -1085,12 +1103,12 @@ func TestUnwrapAndValidateSharesWithMultipleShares(t *testing.T) {
 	}
 
 	if len(unwrapped) != len(wrappedSharesList) {
-		t.Fatalf("unwrapAndValidateShares(context.Background(), %v, %v) did not return the expected number of shares. Got %v, want %v", wrappedSharesList, kekInfoList, len(unwrapped), len(wrappedSharesList))
+		t.Fatalf("unwrapAndValidateShares(t.Context(), %v, %v) did not return the expected number of shares. Got %v, want %v", wrappedSharesList, kekInfoList, len(unwrapped), len(wrappedSharesList))
 	}
 
 	for i, unwrappedShare := range unwrapped {
 		if !bytes.Equal(unwrappedShare.Share, sharesList[i]) {
-			t.Errorf("unwrapAndValidateShares(context.Background(), %v, %v) did not return the expected wrapped share %v. Got %v, want %v", sharesList, kekInfoList, i, unwrappedShare, sharesList[i])
+			t.Errorf("unwrapAndValidateShares(t.Context(), %v, %v) did not return the expected wrapped share %v. Got %v, want %v", sharesList, kekInfoList, i, unwrappedShare, sharesList[i])
 		}
 	}
 }
@@ -1164,7 +1182,7 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	for _, testCase := range testCases {
 		t.Run(testCase.name, func(t *testing.T) {
@@ -1185,11 +1203,11 @@ func TestUnwrapAndValidateSharesError(t *testing.T) {
 			shares, err := stetClient.unwrapAndValidateShares(ctx, testCase.wrappedShares, opts)
 
 			if testCase.expectedErrSubstr != "" && err == nil {
-				t.Errorf("unwrapAndValidateShares(context.Background(), %s, %s) expected to return error, but did not", testCase.wrappedShares, testCase.kekInfos)
+				t.Errorf("unwrapAndValidateShares(t.Context(), %s, %s) expected to return error, but did not", testCase.wrappedShares, testCase.kekInfos)
 			}
 
 			if len(shares) != 0 {
-				t.Errorf("unwrapAndValidateShares(context.Background(), %s, %s) got %v shares, but want 0", testCase.wrappedShares, testCase.kekInfos, len(shares))
+				t.Errorf("unwrapAndValidateShares(t.Context(), %s, %s) got %v shares, but want 0", testCase.wrappedShares, testCase.kekInfos, len(shares))
 			}
 		})
 	}
@@ -1210,7 +1228,7 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	stetClient := &StetClient{
 		testKMSClients: &cloudkms.ClientFactory{
@@ -1222,12 +1240,12 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 	opts := sharesOpts{kekInfos: kekInfoList, asymmetricKeys: &configpb.AsymmetricKeys{}}
 	wrapped, _, err := stetClient.wrapShares(ctx, sharesList, opts)
 	if err != nil {
-		t.Fatalf("wrapShares(context.Background(), %v, %v, {}) returned with error %v", sharesList, kekInfoList, err)
+		t.Fatalf("wrapShares(t.Context(), %v, %v, {}) returned with error %v", sharesList, kekInfoList, err)
 	}
 
 	unwrapped, err := stetClient.unwrapAndValidateShares(ctx, wrapped, opts)
 	if err != nil {
-		t.Errorf("unwrapAndValidateShares(context.Background(), %v, %v, {}) returned with error %v", wrapped, kekInfoList, err)
+		t.Errorf("unwrapAndValidateShares(t.Context(), %v, %v, {}) returned with error %v", wrapped, kekInfoList, err)
 	}
 
 	if len(wrapped) != len(unwrapped) {
@@ -1236,7 +1254,7 @@ func TestWrapAndUnwrapWorkflow(t *testing.T) {
 
 	for i, unwrappedShare := range unwrapped {
 		if !bytes.Equal(unwrappedShare.Share, sharesList[i]) {
-			t.Errorf("unwrapAndValidateShares(context.Background(), %v, %v, {}) = %v, want %v", sharesList, kekInfoList, unwrappedShare, sharesList[i])
+			t.Errorf("unwrapAndValidateShares(t.Context(), %v, %v, {}) = %v, want %v", sharesList, kekInfoList, unwrappedShare, sharesList[i])
 		}
 	}
 }
@@ -1273,7 +1291,7 @@ func TestEncryptAndDecryptWithNoSplitSucceeds(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	stetClient := &StetClient{
 		testKMSClients: &cloudkms.ClientFactory{
@@ -1334,7 +1352,7 @@ func TestEncryptFailsForNoSplitWithTooManyKekInfos(t *testing.T) {
 	}
 	plaintext := []byte("This is data to be encrypted.")
 
-	ctx := context.Background()
+	ctx := t.Context()
 
 	stetClient := &StetClient{
 		testKMSClients: &cloudkms.ClientFactory{
@@ -1389,7 +1407,7 @@ func TestEncryptAndDecryptWithShamirSucceeds(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	fakeKMSClient := &testutil.FakeKeyManagementClient{
 		GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 			return testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE, ""), nil
@@ -1458,7 +1476,7 @@ func TestEncryptFailsForInvalidShamirConfiguration(t *testing.T) {
 	}
 	plaintext := []byte("This is data to be encrypted.")
 
-	ctx := context.Background()
+	ctx := t.Context()
 	fakeKMSClient := &testutil.FakeKeyManagementClient{
 		GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 			return testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE, ""), nil
@@ -1504,7 +1522,7 @@ func TestEncryptGeneratesUUIDForBlobID(t *testing.T) {
 
 	plaintext := []byte("This is data to be encrypted.")
 
-	ctx := context.Background()
+	ctx := t.Context()
 	fakeKMSClient := &testutil.FakeKeyManagementClient{
 		GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 			return testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE, ""), nil
@@ -1554,7 +1572,7 @@ func TestEncryptFailsWithNilConfig(t *testing.T) {
 	var ciphertextBuf bytes.Buffer
 
 	stetConfig := &configpb.StetConfig{EncryptConfig: nil}
-	if _, err := stetClient.Encrypt(context.Background(), plaintextBuf, &ciphertextBuf, stetConfig, ""); err == nil {
+	if _, err := stetClient.Encrypt(t.Context(), plaintextBuf, &ciphertextBuf, stetConfig, ""); err == nil {
 		t.Errorf("Encrypt expected to fail due to nil EncryptConfig.")
 	}
 }
@@ -1674,7 +1692,7 @@ func TestDecryptErrors(t *testing.T) {
 		},
 	}
 
-	ctx := context.Background()
+	ctx := t.Context()
 	fakeKMSClient := &testutil.FakeKeyManagementClient{
 		GetCryptoKeyFunc: func(_ context.Context, req *kmsspb.GetCryptoKeyRequest, _ ...gax.CallOption) (*kmsrpb.CryptoKey, error) {
 			return testutil.CreateEnabledCryptoKey(kmsrpb.ProtectionLevel_SOFTWARE, ""), nil

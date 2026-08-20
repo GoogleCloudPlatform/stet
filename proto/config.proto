@@ -27,6 +27,7 @@ message AsymmetricKey {
   enum Algorithm {
     UNKNOWN_ALGORITHM = 0;
     RSA = 1;
+    MLKEM = 2;
   }
 
   string fingerprint = 1;
@@ -47,6 +48,14 @@ message KekInfo {
     // $ openssl rsa -in test.pem -pubout -outform DER | \
     //     openssl sha256 -binary | openssl base64
     string rsa_fingerprint = 2;
+
+    // The SHA-256 fingerprint of the DER-encoded public key corresponding to
+    // an MLKEM keypair generated for the purposes of offline share encryption.
+    //
+    // Can be generated from a private key PEM with the following command:
+    // $ openssl pkey -in test.pem -pubout -outform DER | \
+    //     openssl sha256 -binary | openssl base64
+    string mlkem_fingerprint = 3;
   }
 }
 

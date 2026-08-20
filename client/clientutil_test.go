@@ -17,7 +17,9 @@ package client
 import (
 	"bytes"
 	"crypto/sha256"
+	"fmt"
 	"io"
+	"strings"
 	"testing"
 
 	"github.com/GoogleCloudPlatform/stet/client/shares"
@@ -298,5 +300,74 @@ func TestMetadataSerializeAvoidsCollisions(t *testing.T) {
 		if bytes.Equal(serialized0, serialized1) {
 			t.Errorf("Expected serializations to be unequal. \nmd0 = {%v}\nmd1 = {%v}", tc[0], tc[1])
 		}
+	}
+}
+
+type errorReader struct {
+	err error
+}
+
+func (r errorReader) Read(p []byte) (n int, err error) {
+	return 0, r.err
+}
+
+func TestAeadEncryptReadError(t *testing.T) {
+	testDEK := shares.NewDEK()
+	testAAD := []byte("AAD")
+	expectedErr := fmt.Errorf("read error")
+	input := errorReader{err: expectedErr}
+	var output bytes.Buffer
+
+	err := AeadEncrypt(testDEK, input, &output, testAAD)
+	if err == nil {
+		t.Error("AeadEncrypt expected error but got nil")
+	} else if !strings.Contains(err.Error(), expectedErr.Error()) {
+		t.Errorf("AeadEncrypt returned error %v, want error containing %v", err, expectedErr)
+	}
+}
+
+func TestReadMetadataErrors(t *testing.T) {
+	testCases := []struct {
+		name              string
+		input             []byte
+		expectedErrSubstr string
+	}{
+		{
+			name:              "Empty input (bad header)",
+			input:             []byte{},
+			expectedErrSubstr: "failed to read STET encrypted file header",
+		},
+		{
+			name: "Short read (metadata length mismatch)",
+			input: func() []byte {
+				var buf bytes.Buffer
+				WriteSTETHeader(&buf, 100) // metadata len 100
+				buf.Write([]byte("too short"))
+				return buf.Bytes()
+			}(),
+			expectedErrSubstr: "failed to read encrypted file metadata",
+		},
+		{
+			name: "Invalid proto",
+			input: func() []byte {
+				var buf bytes.Buffer
+				WriteSTETHeader(&buf, 10)       // metadata len 10
+				buf.Write([]byte("invalidprt")) // 10 bytes of garbage
+				return buf.Bytes()
+			}(),
+			expectedErrSubstr: "failed to unmarshal metadata proto",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			reader := bytes.NewReader(tc.input)
+			_, err := ReadMetadata(reader)
+			if err == nil {
+				t.Error("ReadMetadata expected error but got nil")
+			} else if !strings.Contains(err.Error(), tc.expectedErrSubstr) {
+				t.Errorf("ReadMetadata returned error %v, want error containing %q", err, tc.expectedErrSubstr)
+			}
+		})
 	}
 }
