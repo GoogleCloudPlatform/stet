@@ -166,19 +166,19 @@ path to the public/private keys on disk.
 Generate a private, 2048-bit RSA key:
 
 ```
-$ openssl genrsa -out my_key.pem 2048
+$ openssl genrsa -out rsa_private.pem 2048
 ```
 
 Create a public key file from that private key:
 
 ```
-$ openssl rsa -in my_key.pem -pubout -out my_key.pub
+$ openssl rsa -in rsa_private.pem -pubout -out rsa_public.pem
 ```
 
 Compute the fingerprint of the keypair:
 
 ```
-$ openssl rsa -in stet.pem -pubout -outform DER | openssl sha256 -binary | openssl base64
+$ openssl rsa -in rsa_private.pem -pubout -outform DER | openssl sha256 -binary | openssl base64
 ```
 
 Here is an example config file that encrypts data using a single RSA key:
@@ -200,9 +200,58 @@ decrypt_config:
 
 asymmetric_keys:
   public_key_files:
-  - "/home/me/stet.pub"
+  - "/home/me/rsa_public.pem"
   private_key_files:
-  - "/home/me/stet.pem"
+  - "/home/me/rsa_private.pem"
+```
+
+#### Generating an ML-KEM asymmetric keypair for offline encryption
+
+In addition to using an `rsa_fingerprint` for wrapping shares, you can also
+specify an `mlkem_fingerprint` with a corresponding post-quantum safe ML-KEM
+keypair in the `asymmetric_keys` part of the YAML configuration file.
+
+Generate a private, 768-bit ML-KEM key (1024-bit ML-KEM keys are also
+supported):
+
+```
+$ openssl genpkey -algorithm ML-KEM-768 -out mlkem_private.pem
+```
+
+Create a public key file from that private key:
+
+```
+$ openssl pkey -in mlkem_private.pem -pubout -out mlkem_public.pem
+```
+
+Compute the fingerprint of the keypair:
+
+```
+$ openssl pkey -in mlkem_private.pem -pubout -outform DER | openssl sha256 -binary | openssl base64
+```
+
+Here is an example config file that encrypts data using a single ML-KEM key:
+
+```yaml
+encrypt_config:
+  key_config:
+    kek_infos:
+    - mlkem_fingerprint: "VcY5EQts91HRVATijq70w8D5f+aK63LN3rdYTrM250U="
+    dek_algorithm: AES256_GCM
+    no_split: true
+
+decrypt_config:
+  key_configs:
+  - kek_infos:
+    - mlkem_fingerprint: "VcY5EQts91HRVATijq70w8D5f+aK63LN3rdYTrM250U="
+    dek_algorithm: AES256_GCM
+    no_split: true
+
+asymmetric_keys:
+  public_key_files:
+  - "/home/me/mlkem_public.pem"
+  private_key_files:
+  - "/home/me/mlkem_private.pem"
 ```
 
 ### Execute STET
