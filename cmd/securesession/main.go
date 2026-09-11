@@ -37,6 +37,7 @@ var (
 	plaintext     = flag.String("plaintext", "foobar", "The test plaintext to wrap and unwrap")
 	resourceName  = flag.String("resource", server.KeyPath1, "The relative resource name of the key to wrap/unwrap")
 	skipTLSVerify = flag.Bool("no-inner-tls-verify", false, "When true, skips server verification when establishing inner TLS connection")
+	pqc           = flag.Bool("pqc", false, "When true, enforces PQC compliance (minimum TLS 1.3 and PQC curve preferences)")
 )
 
 func main() {
@@ -65,7 +66,7 @@ func main() {
 
 	glog.Infof("Attempting to connect to secure session server at %v.", *addr)
 
-	ssClient, err := securesession.EstablishSecureSession(ctx, *addr, *authToken, securesession.SkipTLSVerify(*skipTLSVerify))
+	ssClient, err := securesession.EstablishSecureSession(ctx, *addr, *authToken, securesession.SkipTLSVerify(*skipTLSVerify), securesession.EnforcePQC(*pqc))
 	if err != nil {
 		glog.Exit(fmt.Sprintf("Error establishing secure session: %v", err.Error()))
 	}

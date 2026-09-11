@@ -131,7 +131,7 @@ func tryReescalatePrivileges() error {
 	return nil
 }
 
-// tryDescalatePrivileges checks if the process is owned by root but
+// tryDeescalatePrivileges checks if the process is owned by root but
 // invoked as user, and the effective UID is 0 (with non-zero real UID).
 // If so, it attempts to swap the two, thus de-escalating down to user
 // privileges, returning an error if any syscalls fail.
@@ -147,6 +147,7 @@ func tryDeescalatePrivileges() error {
 type secureSessionOptions struct {
 	httpCertPool  *x509.CertPool
 	skipTLSVerify bool
+	enforcePQC    bool
 }
 
 // SecureSessionOption configures EstablishSecureSession.
@@ -168,11 +169,21 @@ func SkipTLSVerify(skipTLSVerify bool) SecureSessionOption {
 	}
 }
 
+// EnforcePQC specifies whether to enforce PQC compliance for the secure session.
+// When enabled, TLS 1.3 is enforced as the minimum version, and PQC curve
+// preferences are prioritized.
+func EnforcePQC(enforcePQC bool) SecureSessionOption {
+	return func(opts *secureSessionOptions) {
+		opts.enforcePQC = enforcePQC
+	}
+}
+
 // DefaultSecureSessionOptions control the default values before
 // applying options passed to EstablishSecureSession.
 var DefaultSecureSessionOptions = []SecureSessionOption{
 	HTTPCertPool(nil),
 	SkipTLSVerify(false),
+	EnforcePQC(false),
 }
 
 // EstablishSecureSession takes in a service address and performs the
@@ -189,7 +200,7 @@ func EstablishSecureSession(ctx context.Context, addr, authToken string, opts ..
 		opt(&options)
 	}
 
-	client, err := newSecureSessionClient(addr, authToken, options.httpCertPool, options.skipTLSVerify)
+	client, err := newSecureSessionClient(addr, authToken, options.httpCertPool, options.skipTLSVerify, options.enforcePQC)
 
 	if err != nil {
 		return nil, fmt.Errorf("error creating a secure session client: %v", err)
@@ -226,18 +237,24 @@ func EstablishSecureSession(ctx context.Context, addr, authToken string, opts ..
 
 // newClient returns a new SecureSessionClient object that connects to a
 // secure session service at the given address.
-func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool, skipTLSVerify bool) (*SecureSessionClient, error) {
+func newSecureSessionClient(addr, authToken string, httpCertPool *x509.CertPool, skipTLSVerify, enforcePQC bool) (*SecureSessionClient, error) {
 	c := &SecureSessionClient{}
 
 	c.client = ekmclient.ConfidentialEKMClient{URI: addr, AuthToken: authToken, CertPool: httpCertPool}
 	c.shim = transportshim.NewTransportShim()
 	c.handshakeState = &atomic.Value{}
 
+	minVersion := uint16(tls.VersionTLS12)
+	if enforcePQC {
+		minVersion = tls.VersionTLS13
+	}
+
 	cfg := &tls.Config{
-		CipherSuites: constants.AllowableCipherSuites,
-		MinVersion:   tls.VersionTLS12,
-		MaxVersion:   tls.VersionTLS13,
-		RootCAs:      httpCertPool,
+		CipherSuites:     constants.AllowableCipherSuites,
+		CurvePreferences: constants.CurvePreferences,
+		MinVersion:       minVersion,
+		MaxVersion:       tls.VersionTLS13,
+		RootCAs:          httpCertPool,
 	}
 
 	// If in testing mode, skip verification. Otherwise, set ServerName based on key URI.
@@ -697,4 +714,9 @@ func (c *SecureSessionClient) ConfidentialUnwrap(ctx context.Context, keyPath, r
 	}
 
 	return unwrapResp.GetPlaintext(), nil
+}
+
+// ConnectionState returns the TLS connection state of the secure session.
+func (c *SecureSessionClient) ConnectionState() tls.ConnectionState {
+	return c.tls.ConnectionState()
 }

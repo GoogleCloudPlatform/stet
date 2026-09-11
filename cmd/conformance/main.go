@@ -124,6 +124,7 @@ func newEKMClientWithSuites(ctx context.Context, key *externalKeyInfo, cipherSui
 
 	cfg := &tls.Config{
 		CipherSuites:       cipherSuites,
+		CurvePreferences:   constants.CurvePreferences,
 		MinVersion:         tls.VersionTLS12,
 		MaxVersion:         tls.VersionTLS13,
 		RootCAs:            key.certs,

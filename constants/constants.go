@@ -29,6 +29,13 @@ var AllowableCipherSuites = []uint16{
 	tls.TLS_ECDHE_ECDSA_WITH_CHACHA20_POLY1305_SHA256,
 }
 
+// CurvePreferences is a set of TLS curve IDs / key exchange mechanisms to
+// allow for the inner session on both the client and server, prioritizing PQC.
+var CurvePreferences = []tls.CurveID{
+	tls.X25519MLKEM768, // Prioritize PQC curve.
+	tls.X25519,
+}
+
 // AttestationPrefix is the protocol-defined prefix for finalizing attestations.
 const AttestationPrefix = "TLSAttestationV1"
 

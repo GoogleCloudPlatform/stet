@@ -116,6 +116,7 @@ type encryptCmd struct {
 	blobID             string
 	insecureSkipVerify bool
 	quiet              bool
+	pqc                bool
 }
 
 func (*encryptCmd) Name() string { return "encrypt" }
@@ -161,6 +162,7 @@ func (e *encryptCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&e.blobID, "blob-id", "", "The blob ID to assign to the encrypted blob. Optional.")
 	f.BoolVar(&e.insecureSkipVerify, "insecure-skip-verify", false, "Disable certificate check for inner TLS session.")
 	f.BoolVar(&e.quiet, "quiet", false, "Suppress logging output.")
+	f.BoolVar(&e.pqc, "pqc", false, "Enforce PQC compliance for secure session (minimum TLS 1.3 and PQC curve preferences).")
 }
 
 func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) subcommands.ExitStatus {
@@ -228,6 +230,7 @@ func (e *encryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) sub
 	// Initialize StetClient and encrypt plaintext.
 	c := client.StetClient{
 		InsecureSkipVerify: e.insecureSkipVerify,
+		EnforcePQC:         e.pqc,
 		Version:            version,
 	}
 
@@ -268,6 +271,7 @@ type decryptCmd struct {
 	blobID             string
 	insecureSkipVerify bool
 	quiet              bool
+	pqc                bool
 }
 
 func (*decryptCmd) Name() string { return "decrypt" }
@@ -327,6 +331,7 @@ func (d *decryptCmd) SetFlags(f *flag.FlagSet) {
 	f.StringVar(&d.blobID, "blob-id", "", "The blob ID to validate the decryption against. Optional.")
 	f.BoolVar(&d.insecureSkipVerify, "insecure-skip-verify", false, "Disable certificate check for inner TLS session.")
 	f.BoolVar(&d.quiet, "quiet", false, "Suppress logging output.")
+	f.BoolVar(&d.pqc, "pqc", false, "Enforce PQC compliance for secure session (minimum TLS 1.3 and PQC curve preferences).")
 }
 
 func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) subcommands.ExitStatus {
@@ -393,6 +398,7 @@ func (d *decryptCmd) Execute(ctx context.Context, f *flag.FlagSet, _ ...any) sub
 	// Initialize StetClient and decrypt plaintext.
 	c := client.StetClient{
 		InsecureSkipVerify: d.insecureSkipVerify,
+		EnforcePQC:         d.pqc,
 		Version:            version,
 	}
 

@@ -1033,3 +1033,37 @@ func TestConfidentialUnwrapErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestPQCOption(t *testing.T) {
+	var opts secureSessionOptions
+	EnforcePQC(true)(&opts)
+	if !opts.enforcePQC {
+		t.Errorf("EnforcePQC(true) set enforcePQC = false, want true")
+	}
+
+	EnforcePQC(false)(&opts)
+	if opts.enforcePQC {
+		t.Errorf("EnforcePQC(false) set enforcePQC = true, want false")
+	}
+}
+
+func TestConnectionState(t *testing.T) {
+	expected := tls.ConnectionState{
+		Version:           tls.VersionTLS13,
+		CurveID:           tls.X25519MLKEM768,
+		HandshakeComplete: true,
+	}
+
+	ssClient := &SecureSessionClient{
+		tls: &fakeTLSConn{
+			connectionStateFunc: func() tls.ConnectionState {
+				return expected
+			},
+		},
+	}
+
+	got := ssClient.ConnectionState()
+	if got.Version != expected.Version || got.CurveID != expected.CurveID || got.HandshakeComplete != expected.HandshakeComplete {
+		t.Errorf("ConnectionState() = %+v, want %+v", got, expected)
+	}
+}

@@ -36,7 +36,6 @@ import (
 	"github.com/GoogleCloudPlatform/stet/constants"
 	attpb "github.com/GoogleCloudPlatform/stet/proto/attestation_evidence_go_proto"
 	cwpb "github.com/GoogleCloudPlatform/stet/proto/confidential_wrap_go_proto"
-	pb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	sspb "github.com/GoogleCloudPlatform/stet/proto/secure_session_go_proto"
 	ts "github.com/GoogleCloudPlatform/stet/transportshim"
 	tpmpb "github.com/google/go-tpm-tools/proto/attest"
@@ -112,7 +111,7 @@ type SecureSessionService struct {
 	testTokenValidator *idtoken.Validator
 
 	// Necessary to embed these to maintain forward compatibility.
-	pb.UnimplementedConfidentialEkmSessionEstablishmentServiceServer
+	sspb.UnimplementedConfidentialEkmSessionEstablishmentServiceServer
 	cwpb.UnimplementedConfidentialWrapUnwrapServiceServer
 }
 
@@ -144,6 +143,7 @@ func NewChannel(tlsVersion uint16) (ch *Channel, err error) {
 		MinVersion:             tlsVersion,
 		MaxVersion:             tlsVersion,
 		CipherSuites:           constants.AllowableCipherSuites,
+		CurvePreferences:       constants.CurvePreferences,
 		SessionTicketsDisabled: true,
 		InsecureSkipVerify:     true,
 	}

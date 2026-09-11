@@ -80,6 +80,9 @@ type StetClient struct {
 	// Whether to skip verification of the inner TLS session cert.
 	InsecureSkipVerify bool
 
+	// Whether to enforce PQC compliance (minimum TLS 1.3 and PQC curve preferences) for secure sessions.
+	EnforcePQC bool
+
 	// The version of STET, if set. This is used to construct user agent
 	// strings for Cloud KMS requests.
 	Version string
@@ -134,7 +137,7 @@ func (c *StetClient) ekmSecureSessionWrap(ctx context.Context, unwrappedShare []
 			return nil, err
 		}
 
-		ekmClient, err = securesession.EstablishSecureSession(ctx, md.uri, authToken, securesession.HTTPCertPool(ekmCertPool), securesession.SkipTLSVerify(c.InsecureSkipVerify))
+		ekmClient, err = securesession.EstablishSecureSession(ctx, md.uri, authToken, securesession.HTTPCertPool(ekmCertPool), securesession.SkipTLSVerify(c.InsecureSkipVerify), securesession.EnforcePQC(c.EnforcePQC))
 		if err != nil {
 			return nil, fmt.Errorf("error establishing secure session: %v", err)
 		}
@@ -168,7 +171,7 @@ func (c *StetClient) ekmSecureSessionUnwrap(ctx context.Context, wrappedShare []
 			return nil, err
 		}
 
-		ekmClient, err = securesession.EstablishSecureSession(ctx, md.uri, authToken, securesession.HTTPCertPool(ekmCertPool), securesession.SkipTLSVerify(c.InsecureSkipVerify))
+		ekmClient, err = securesession.EstablishSecureSession(ctx, md.uri, authToken, securesession.HTTPCertPool(ekmCertPool), securesession.SkipTLSVerify(c.InsecureSkipVerify), securesession.EnforcePQC(c.EnforcePQC))
 		if err != nil {
 			return nil, fmt.Errorf("error establishing secure session: %v", err)
 		}
